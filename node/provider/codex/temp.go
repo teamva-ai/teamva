@@ -57,6 +57,18 @@ func prepareCodexRunTemp(request adapter.RunRequest) error {
 
 func codexRunConfig(request adapter.RunRequest, readOnlyPaths ...string) map[string]any {
 	config := codexPermissionConfig(readOnlyPaths...)
+	if request.MCPURL != "" && request.MCPToken != "" {
+		config["mcp_servers"] = map[string]any{
+			"teamva-issue": map[string]any{
+				"enabled": true,
+				"url":     request.MCPURL,
+				"http_headers": map[string]any{
+					"Authorization": "Bearer " + request.MCPToken,
+				},
+				"experimental_use_rmcp_client": true,
+			},
+		}
+	}
 	if temp := codexRunTempDir(request); temp != "" {
 		// Native 0.163.0 config/src/shell_environment_policy.rs::ShellEnvironmentPolicyToml.set.
 		// zsh does NOT derive its heredoc location from TMPDIR: its documented

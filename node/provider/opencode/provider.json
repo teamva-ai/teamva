@@ -8,7 +8,7 @@
   "install_hint": "应用已内置 OpenCode，无需单独安装；也可在设置中指定外部 opencode 可执行文件",
   "login_hint": "可在 Agent 页面添加模型 API；也可在外部 OpenCode 中登录已有供应商账号",
   "docs_url": "https://opencode.ai/v2/docs/providers",
-  "features": ["streaming", "resume", "interrupt", "approval", "steer", "images", "read_only", "no_tools", "skills", "computer_use", "file_bridge"],
+  "features": ["streaming", "resume", "interrupt", "approval", "steer", "images", "read_only", "no_tools", "skills", "computer_use", "file_bridge", "mcp_tools"],
   "diagnostic_steps": [
     {"id": "executable", "label": "CLI executable"},
     {"id": "version", "label": "CLI version"},

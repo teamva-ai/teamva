@@ -25,7 +25,7 @@
 - `server/sqlite/schema/`：当前控制面 SQLite 基线；`node/internal/localstore/schema.sql` 为运行库基线；
 - `node/embedded/`：桌面可导入的通用 Provider Controller；
 - `node/provider/`：公开 Provider API、自动发现 catalog，以及各 Coding Agent/CLI 的独立接入目录；
-- `node/internal/`：Runtime、FileBridge 和 ToolBroker；
+- `node/internal/`：Runtime、Run 级 MCP 工具通道、FileBridge 回退和 ToolBroker；
 - `protocol/`：Local API OpenAPI 与 Embedded Runtime 协议；
 - `scripts/e2e/`：API、Chrome 和真实 Provider 验收；
 

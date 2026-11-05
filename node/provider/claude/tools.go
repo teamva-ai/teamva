@@ -22,6 +22,7 @@ const mcpServerName = "teamva"
 const maxToolBytes = 1 << 20
 
 type toolScope struct {
+	remoteIssue        bool
 	roots              []string
 	writableRoots      []string
 	cwd                string
@@ -39,7 +40,7 @@ var bridgeReadTools = map[string]bool{"issue_get": true, "issue_agents_list": tr
 var bridgeWriteTools = map[string]bool{"issue_comment_create": true, "issue_comment_update_own": true}
 
 func newToolScope(c *Client, config provider.InstanceConfig, request provider.RunRequest) (*toolScope, error) {
-	s := &toolScope{readOnly: config.ReadOnly || request.ReadOnly, disabled: config.DisableTools || request.DisableTools, ipcTools: map[string]bool{}, pins: map[string]*pinnedDirectory{}}
+	s := &toolScope{remoteIssue: request.MCPURL != "", readOnly: config.ReadOnly || request.ReadOnly, disabled: config.DisableTools || request.DisableTools, ipcTools: map[string]bool{}, pins: map[string]*pinnedDirectory{}}
 	s.protected = []string{c.configDir, c.dataDir}
 	if home, err := os.UserHomeDir(); err == nil {
 		for _, name := range []string{".claude", ".codex", ".config/opencode", ".local/share/opencode"} {

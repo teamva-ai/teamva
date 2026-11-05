@@ -274,7 +274,20 @@ func (c *Client) run(ctx context.Context, request provider.RunRequest, sink prov
 		return session, errors.New("write claude system prompt failed")
 	}
 	args := []string{"--print", "--bare", "--disable-slash-commands", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--setting-sources=", "--strict-mcp-config", "--tools", "", "--permission-mode", "default", "--permission-prompt-tool", "stdio", "--system-prompt-file", promptPath}
-	args = append(args, "--mcp-config", claudeMCPConfig(scope.disabled, request.MCPURL, request.MCPToken))
+	mcpFile, err := os.CreateTemp(c.configDir, "mcp-config-*.json")
+	if err != nil {
+		return session, errors.New("create claude MCP config failed")
+	}
+	mcpConfigPath := mcpFile.Name()
+	defer os.Remove(mcpConfigPath)
+	if _, err := mcpFile.WriteString(claudeMCPConfig(scope.disabled, request.MCPURL, request.MCPToken)); err != nil {
+		mcpFile.Close()
+		return session, errors.New("write claude MCP config failed")
+	}
+	if err := mcpFile.Close(); err != nil {
+		return session, errors.New("close claude MCP config failed")
+	}
+	args = append(args, "--mcp-config", mcpConfigPath)
 	model := request.Model
 	if model == "" {
 		model = config.Model
@@ -676,9 +689,10 @@ func (c *Client) handleControl(ctx context.Context, a *activeRun, scope *toolSco
 	responseError := ""
 	switch request["subtype"] {
 	case "can_use_tool":
-		name, _ := request["tool_name"].(string)
-		name = strings.TrimPrefix(name, "mcp__"+mcpServerName+"__")
-		if scope.permits(name) && strings.HasPrefix(stringValue(request["tool_name"]), "mcp__"+mcpServerName+"__") {
+		toolName := stringValue(request["tool_name"])
+		name := strings.TrimPrefix(toolName, "mcp__"+mcpServerName+"__")
+		remoteIssueTool := scope.remoteIssue && strings.HasPrefix(toolName, "mcp__teamva-issue__")
+		if remoteIssueTool || (scope.permits(name) && strings.HasPrefix(toolName, "mcp__"+mcpServerName+"__")) {
 			response = map[string]any{"behavior": "allow", "updatedInput": request["input"]}
 		} else {
 			response = map[string]any{"behavior": "deny", "message": "Tool is outside the host-authorized catalog; permission escalation is not available"}

@@ -55,7 +55,7 @@ Run event 按 `(run_id, lease_epoch, sequence)` 排序。累计 ACK 只有在 Co
 - `issue_comment_create`：发评论并可结构化 @ 其他 Agent；
 - `issue_comment_update_own`：只修正当前有效 Run 所属 Issue 内本 Agent 自己的评论；
 - 评论写入、修订、每次新增 mention 和幂等回执在同一事务提交；同条总结再次委派同一目标也生成独立 mention，重试同一请求不重复激活；
-- `issue_comment_create` 的 `append_new` 在文件桥完整透传，只有明确要求另发评论时使用；
+- `issue_comment_create` 的 `append_new` 在 MCP 工具与文件桥回退中完整透传，只有明确要求另发评论时使用；
 - `issue_agent_context` 的版本化游标固定实例，每页最多一个 Run、128 个事件并返回 `truncated` / `next_cursor`；不会因新一次 @ 串到其他会话；
 - `issue_agents_list`：列出可委派 Agent；
 - 文件和 shell 工具：受 Resource、Provider 原生权限/Approval 和 run scope 约束；Policy CRUD 不构成执行授权。

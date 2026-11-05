@@ -47,7 +47,7 @@ HTTP 操作在提交前建档，成功后关联其事务变更并补全元数据
 | `work_record_get` | 元数据、后续动作、可访问的对象链接 |
 | `work_history_read` | 按 ID 读取原始任务/节点/消息/评论/助手会话；列表有分页边界 |
 
-ToolService 从持久化 Run 取得 owner/computer/scope 并验证运行仍有效，不使用模型传入的身份。助手桥只暴露以上工具，任何业务写工具均拒绝。Provider 侧关闭 Computer Use、提权、业务写根；宿主文件桥所需的隔离 IPC 写入不等于业务写权限。Codex 与 OpenCode 的具体约束见 `protocol/node/README.md`。
+ToolService 从持久化 Run 取得 owner/computer/scope 并验证运行仍有效，不使用模型传入的身份。助手桥只暴露以上工具，任何业务写工具均拒绝。Provider 侧关闭 Computer Use、提权、业务写根；宿主 MCP 工具通道（或回退文件桥）所需的隔离通信不等于业务写权限。Codex 与 OpenCode 的具体约束见 `protocol/node/README.md`。
 
 ## 开发和验收
 

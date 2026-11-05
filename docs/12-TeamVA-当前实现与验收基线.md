@@ -25,7 +25,7 @@
 ### 1.3 Runtime
 
 - 自动探测 Codex/OpenCode 和模型；
-- Embedded Controller、RuntimeManager、FileBridge、ToolBroker；
+- Embedded Controller、RuntimeManager、Run 级 MCP 工具通道、FileBridge 回退、ToolBroker；
 - 资源注册/验证、工具评论、原生审批、停止、native session、上下文整理事件；
 - 多 Agent 并行；禁止直接 @ 自己，允许间接循环委派。
 

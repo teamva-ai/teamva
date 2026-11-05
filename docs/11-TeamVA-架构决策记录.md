@@ -27,7 +27,7 @@
 
 ## ADR-006：Embedded Runtime 复用 Node Adapter
 
-决定：桌面 Embedded Runtime 复用 Codex/OpenCode Manager、Adapter、FileBridge 和 ToolBroker。
+决定：桌面 Embedded Runtime 复用 Codex/OpenCode Manager、Adapter、Run 级 MCP 工具通道（FileBridge 仅作回退）和 ToolBroker。
 原因：不复制 Provider 协议和 session 生命周期。
 
 ## ADR-007：领域依赖细分 Store 契约

@@ -21,6 +21,7 @@ type writeSandbox struct {
 	cwd         string
 	profilePath string
 	fingerprint string
+	mcpURL      string
 	env         map[string]string
 	runTemp     *runTempDirectory
 }
@@ -79,10 +80,13 @@ func (c *Client) prepareSandboxLocked(ctx context.Context, request provider.RunR
 	if err != nil {
 		return err // No silently unsandboxed fallback and no fake shell success.
 	}
+	if err := writeRunMCPConfig(c.configDir, request.MCPURL, request.MCPToken); err != nil {
+		return err
+	}
 	c.mu.Lock()
 	ready := c.sandboxReady
 	c.mu.Unlock()
-	if previous == nil || previous.fingerprint != sandbox.fingerprint || !ready {
+	if previous == nil || previous.fingerprint != sandbox.fingerprint || previous.mcpURL != sandbox.mcpURL || !ready {
 		if err := c.stopProcess(); err != nil {
 			return errors.New("stop previous opencode sandbox failed")
 		}
@@ -233,8 +237,8 @@ func buildWriteSandbox(ctx context.Context, c *Client, request provider.RunReque
 	// Scope reuse includes the exact per-Run environment, not just profile text.
 	// A warm Resume must never keep the previous Run's temp/IPC environment.
 	encodedEnv, _ := json.Marshal(env)
-	sandbox := &writeSandbox{cwd: cwd, profilePath: profilePath,
-		fingerprint: fmt.Sprintf("%x", sha256.Sum256([]byte(cwd+"\x00"+profile+"\x00"+string(encodedEnv)))), env: env, runTemp: runTemp}
+	sandbox := &writeSandbox{cwd: cwd, profilePath: profilePath, mcpURL: request.MCPURL,
+		fingerprint: fmt.Sprintf("%x", sha256.Sum256([]byte(cwd+"\x00"+profile+"\x00"+string(encodedEnv)+"\x00"+request.MCPURL))), env: env, runTemp: runTemp}
 	if runTemp != nil {
 		if err := runTemp.validate(); err != nil {
 			return nil, err

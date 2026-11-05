@@ -1116,7 +1116,7 @@ func (r *Runtime) execute(ctx context.Context, command nodeprotocol.CommandEnvel
 		for feature, required := range map[string]bool{
 			"images": len(payload.Attachments) > 0, "read_only": payload.ReadOnly,
 			"skills": len(payload.Skills) > 0, "computer_use": payload.ComputerUse && !payload.DisableTools,
-			"file_bridge": (payload.IssueID != "" || payload.AssistantSessionID != "") && !payload.DisableTools,
+			"file_bridge": (payload.IssueID != "" || payload.AssistantSessionID != "") && !payload.DisableTools && !metadata.Supports("mcp_tools"),
 		} {
 			if required && !metadata.Supports(feature) {
 				return nil, codedError("capability_unsupported", "Provider 不支持所需能力: "+feature)
@@ -1324,7 +1324,7 @@ func (r *Runtime) execute(ctx context.Context, command nodeprotocol.CommandEnvel
 			broker := NewToolBroker(r.toolCaller, payload.RunID, payload.IssueID,
 				payload.IssueAgentInstanceID, payload.AgentID)
 			broker.workAssistant = payload.AssistantSessionID != ""
-			if payload.IssueID != "" && metadata.Supports("mcp_tools") {
+			if (payload.IssueID != "" || payload.AssistantSessionID != "") && metadata.Supports("mcp_tools") {
 				host, hostErr := newRunMCPHost(ctx, broker, request.ReadOnly)
 				if hostErr == nil {
 					mcpHost = host
@@ -1376,7 +1376,11 @@ func (r *Runtime) execute(ctx context.Context, command nodeprotocol.CommandEnvel
 				}
 			}
 			if mcpHost != nil && strings.TrimSpace(request.Prompt) != "" {
-				request.Prompt += "\n\n" + issueMCPToolsMarkdown(payload.AgentID, request.ReadOnly)
+				if payload.AssistantSessionID != "" {
+					request.Prompt += "\n\n" + workMCPToolsMarkdown()
+				} else {
+					request.Prompt += "\n\n" + issueMCPToolsMarkdown(payload.AgentID, request.ReadOnly)
+				}
 			}
 		}
 		if !metadata.Supports("resume") {

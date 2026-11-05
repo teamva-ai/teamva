@@ -158,3 +158,48 @@ func TestRunMCPHostRejectsMalformedWorkItems(t *testing.T) {
 	encoded, _ := json.Marshal(result)
 	t.Logf("%s", encoded)
 }
+
+func TestRunMCPHostServesOnlyWorkReadToolsForAssistants(t *testing.T) {
+	caller := &mcpHostCaller{}
+	broker := NewToolBroker(caller, "run-work", "", "", "")
+	broker.workAssistant = true
+	host, err := newRunMCPHost(t.Context(), broker, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer host.Close()
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
+	session, err := client.Connect(t.Context(), &mcp.StreamableClientTransport{
+		Endpoint:             host.URL(),
+		HTTPClient:           &http.Client{Transport: bearerTransport{token: host.Token(), base: http.DefaultTransport}},
+		DisableStandaloneSSE: true,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	tools, err := session.ListTools(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundWork := false
+	for _, tool := range tools.Tools {
+		if tool.Name == "issue_get" || tool.Name == "issue_comment_create" {
+			t.Fatalf("assistant exposed issue tool %s", tool.Name)
+		}
+		if tool.Name == "work_records_query" {
+			foundWork = true
+		}
+	}
+	if !foundWork {
+		t.Fatal("assistant work tools missing")
+	}
+	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "work_records_query", Arguments: map[string]any{"limit": 5}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError || len(caller.requests) != 1 || caller.requests[0].Tool != "work_records_query" {
+		t.Fatalf("work tool call failed: %+v %+v", result, caller.requests)
+	}
+}

@@ -24,8 +24,7 @@ PARTIAL_RESOURCE_A_DISPLAY="Runtime Partial A"
 PARTIAL_RESOURCE_B_DISPLAY="Runtime Partial B"
 WORKSPACE_WRITE_MARKER="teamva-workspace-write.txt"
 WORKSPACE_WRITE_CONTENT="workspace-write:$PROVIDER"
-FILEBRIDGE_COMMENT_REQUEST_NAME="req-runtime-smoke-comment.json"
-FILEBRIDGE_COMMENT_MARKER="teamva-local-runtime-smoke-filebridge-marker-v1"
+MCP_COMMENT_MARKER="teamva-local-runtime-smoke-mcp-marker-v1"
 SAFE_GIT_HOME=""
 SAFE_GIT_HOOKS=""
 COOKIE_JAR=""
@@ -690,7 +689,7 @@ api() {
     -H "Origin: $BASE_URL" "$BASE_URL$path")
   : >"$RESPONSE_FILE"
   [[ -z "$body" ]] || args+=(-H 'Content-Type: application/json' --data-binary @-)
-  if [[ "$method" != GET && "$method" != HEAD ]]; then
+  if [[ "$method" != GET && "$method" != HEAD && "$path" != "/v1/auth/local-session" ]]; then
     [[ -s "$CURL_SECRET_CONFIG" ]] || fail 'CSRF curl configuration is unavailable'
     args+=(--config "$CURL_SECRET_CONFIG")
   fi
@@ -814,45 +813,6 @@ assert_schedule_workspace_writes() {
     fail 'Schedule Run did not write the second exact partial root'
   [[ ! -e "$PARTIAL_REPOSITORY_ROOT/$WORKSPACE_WRITE_MARKER" ]] || \
     fail 'Schedule Run widened write access to the partial repository root'
-}
-
-assert_issue_filebridge_comment() {
-  resolve_project_workspace || fail 'exact project Workspace could not be resolved from its repository map'
-  local agents_directory="$PROJECT_WORKSPACE_PATH/.teamva"
-  local requests_directory="$agents_directory/tool-requests"
-  local run_directory="$requests_directory/$RUN_ID"
-  local tool_directory="$run_directory/issue_comment_create"
-  local request_file="$tool_directory/$FILEBRIDGE_COMMENT_REQUEST_NAME"
-  local response_file="$request_file.response.json"
-  local directory canonical_tool_directory="" expected_request_id=""
-
-  [[ "$RUN_ID" =~ ^[A-Za-z0-9_-]{1,128}$ && -n "$AGENT_COMMENT_ID" ]] || \
-    fail 'Issue FileBridge evidence identifiers are invalid'
-  for directory in "$agents_directory" "$requests_directory" "$run_directory" "$tool_directory"; do
-    [[ -d "$directory" && ! -L "$directory" ]] || \
-      fail 'Issue FileBridge evidence directory is not a non-symlink directory'
-  done
-  if ! canonical_tool_directory="$(CDPATH='' cd -- "$tool_directory" 2>/dev/null && pwd -P)"; then
-    fail 'Issue FileBridge evidence directory cannot be canonicalized'
-  fi
-  [[ "$canonical_tool_directory" == "$tool_directory" ]] || \
-    fail 'Issue FileBridge evidence directory escaped the isolated fixture'
-  [[ -f "$request_file" && ! -L "$request_file" ]] || \
-    fail 'Issue FileBridge request evidence is not a non-symlink regular file'
-  [[ -f "$response_file" && ! -L "$response_file" ]] || \
-    fail 'Issue FileBridge response evidence is not a non-symlink regular file'
-  expected_request_id="${FILEBRIDGE_COMMENT_REQUEST_NAME%.json}"
-  jq -e --arg marker "$FILEBRIDGE_COMMENT_MARKER" '
-    type == "object" and .body == $marker and .mentioned_agent_ids == []
-  ' "$request_file" >/dev/null 2>&1 || \
-    fail 'Issue FileBridge request evidence did not contain the exact marker and empty mentions'
-  jq -e --arg comment "$AGENT_COMMENT_ID" --arg request "$expected_request_id" '
-    type == "object" and .request_id == $request and .ok == true and
-    (.data | type) == "object" and .data.comment_id == $comment and
-    (.data.version | type) == "number" and .data.version >= 1 and
-    (.data.version | floor) == .data.version
-  ' "$response_file" >/dev/null 2>&1 || \
-    fail 'Issue FileBridge response evidence did not identify the published Run comment'
 }
 
 wait_for_git_snapshots() {
@@ -1028,26 +988,21 @@ PARTIAL_GIT_REPOSITORY_ID="$(jq -er --arg partial_a "$PARTIAL_RESOURCE_A_ID" \
 
 api POST "/v1/computers/$COMPUTER_ID/agents" 201 \
   "$(jq -cn --arg service "$SERVICE_ID" --arg model "$MODEL" \
-    --arg request "$FILEBRIDGE_COMMENT_REQUEST_NAME" \
-    --arg marker "$FILEBRIDGE_COMMENT_MARKER" '
+    --arg marker "$MCP_COMMENT_MARKER" '
       {agent_service_id:$service,model:$model,name:"本地开发助手",skill_version_ids:[],
        system_prompt:(
-         "严格按任务要求工作且不要修改代码。Issue Run 必须通过注入的当前 Run 专属 FileBridge 调用 issue_comment_create；" +
-         "把 <当前RUN_ID> 替换为工具说明中的真实 Run ID，并精确写入 .teamva/tool-requests/<当前RUN_ID>/issue_comment_create/" + $request + "。" +
-         "请求 JSON 的 body 必须精确等于固定非秘密 marker `" + $marker + "`，mentioned_agent_ids 必须精确为 []；不得改用其他请求名。"
+         "严格按任务要求工作且不要修改代码。Issue Run 必须调用 teamva-issue MCP server 的 issue_comment_create 工具；" +
+         "body 必须精确等于固定非秘密 marker `" + $marker + "`，mentioned_agent_ids 必须精确为 []；不得改用其他工具。"
        )}
     ')"
 AGENT_ID="$(data '.id')"
 
 api POST "/v1/projects/$PROJECT_ID/issues" 201 \
-  "$(jq -cn --arg request "$FILEBRIDGE_COMMENT_REQUEST_NAME" \
-    --arg marker "$FILEBRIDGE_COMMENT_MARKER" '
+  "$(jq -cn --arg marker "$MCP_COMMENT_MARKER" '
       {title:"真实本地执行",status:"open",
        description:(
-         "读取上下文且不修改代码。必须使用当前 Run 的固定 FileBridge 请求路径 " +
-         ".teamva/tool-requests/<当前RUN_ID>/issue_comment_create/" + $request +
-         " 调用 issue_comment_create（将 <当前RUN_ID> 替换为工具说明中的真实 Run ID）。" +
-         "请求 body 必须精确为固定非秘密 marker `" + $marker + "`，mentioned_agent_ids 必须为 []；不要使用其他请求文件名。"
+         "读取上下文且不修改代码。必须调用 teamva-issue MCP server 的 issue_comment_create 工具；" +
+         "body 必须精确为固定非秘密 marker `" + $marker + "`，mentioned_agent_ids 必须为 []。"
        )}
     ')"
 ISSUE_ID="$(data '.id')"
@@ -1109,7 +1064,9 @@ for ((attempt = 0; attempt < 300; attempt++)); do
 done
 [[ "$status" == succeeded ]] || fail 'Issue Run did not succeed'
 [[ -n "$AGENT_COMMENT_ID" ]] || fail 'Agent did not publish an Issue comment for the exact Run'
-assert_issue_filebridge_comment
+jq -e --arg comment "$AGENT_COMMENT_ID" --arg marker "$MCP_COMMENT_MARKER" '
+  any(.data.items[]; .id == $comment and .body == $marker)
+' <<<"$RESPONSE" >/dev/null || fail 'Agent comment did not contain the exact MCP marker'
 wait_for_git_snapshots "$RUN_ID" 'Issue Run'
 assert_git_fingerprint_unchanged 'Issue Run' "$GIT_FINGERPRINT_ISSUE"
 
