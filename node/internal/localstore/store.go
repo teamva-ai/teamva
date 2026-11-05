@@ -79,6 +79,15 @@ const (
 
 var ErrCommandConflict = errors.New("durable command message ID conflicts with persisted command")
 
+// sqliteFileURL keeps Windows drive letters in the URI path, never the authority.
+func sqliteFileURL(path string) *url.URL {
+	slashed := filepath.ToSlash(path)
+	if !strings.HasPrefix(slashed, "/") {
+		slashed = "/" + slashed
+	}
+	return &url.URL{Scheme: "file", Path: slashed}
+}
+
 func Open(ctx context.Context, path string) (*Store, error) {
 	if path == "" {
 		return nil, errors.New("node sqlite path is required")
@@ -91,7 +100,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		if existing.Mode()&os.ModeSymlink != 0 || !existing.Mode().IsRegular() {
 			return nil, errors.New("node sqlite path is not a safe regular file")
 		}
-		location := &url.URL{Scheme: "file", Path: absolutePath}
+		location := sqliteFileURL(absolutePath)
 		location.RawQuery = "mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(5000)"
 		readOnly, err := sql.Open("sqlite", location.String())
 		if err != nil {
@@ -113,7 +122,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	} else if !errors.Is(statErr, os.ErrNotExist) {
 		return nil, fmt.Errorf("inspect node sqlite path: %w", statErr)
 	}
-	databaseURL := (&url.URL{Scheme: "file", Path: absolutePath}).String()
+	databaseURL := sqliteFileURL(absolutePath).String()
 	parameters := url.Values{}
 	parameters.Add("_pragma", "busy_timeout(5000)")
 	parameters.Add("_pragma", "journal_mode(WAL)")

@@ -2,14 +2,13 @@
 
 package claude
 
-import (
-	"errors"
-	"os"
-)
+import "os"
 
-// A platform without verified link-count checks must fail closed for file reads.
-func singleLink(os.FileInfo) bool { return false }
-func noFollowReadFlags(bool) int  { return os.O_RDONLY }
-func openChildRoot(*os.Root, string) (*os.Root, error) {
-	return nil, errors.New("safe directory descriptors unavailable on this platform")
+// Windows does not expose a link count through os.FileInfo. Roots still confine
+// every read to the authorized directory; the extra hard-link check is Unix-only.
+func singleLink(info os.FileInfo) bool { return info.Mode().IsRegular() }
+func noFollowReadFlags(bool) int       { return os.O_RDONLY }
+
+func openChildRoot(parent *os.Root, name string) (*os.Root, error) {
+	return parent.OpenRoot(name)
 }

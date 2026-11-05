@@ -113,7 +113,13 @@ func existingSQLiteRegularFile(path string) (bool, fs.FileInfo, error) {
 }
 
 func sqliteFileDSN(path string, readOnly bool) string {
-	location := &url.URL{Scheme: "file", Path: filepath.ToSlash(path)}
+	// A Windows drive-letter path must be a URI path ("/C:/..."), not an
+	// authority ("C:"), or SQLite rejects the DSN.
+	slashed := filepath.ToSlash(path)
+	if !strings.HasPrefix(slashed, "/") {
+		slashed = "/" + slashed
+	}
+	location := &url.URL{Scheme: "file", Path: slashed}
 	query := location.Query()
 	query.Add("_pragma", "busy_timeout(5000)")
 	if readOnly {

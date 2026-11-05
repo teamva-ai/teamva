@@ -46,9 +46,9 @@ Provider 内嵌的 V2 `permission.evaluate` 插件仅能把允许/询问收紧�
 它不放宽任何原生规则。加载失败或尚未激活时 Provider 在模型请求之前失败关闭。
 插件同时移除会改变相对规则含义且没有原生权限检查的 `opencode_session_move`。
 
-普通编码保留 native formatter/LSP/snapshot 行为，它们的子进程继承同一个 OS 写入沙箱；
-只读或 NoTools 实例关闭这些自动编码副作用。原生 subagent 在正常 OS 沙箱生效后可用，子会话
-继承会话规则，子进程继承 Seatbelt；只读时仍拒绝。Location 移动工具始终移除。
+普通编码保留 native formatter/LSP/snapshot 行为；macOS 上子进程继承 Seatbelt，
+Windows/Linux 不启用 Teamva 的 OS 写入沙箱。只读或 NoTools 实例关闭这些自动编码副作用。
+原生 subagent 在正常 Run 中可用，子会话继承会话规则；只读时仍拒绝。Location 移动工具始终移除。
 
 ## macOS 的真实 OS 写入边界
 
@@ -71,8 +71,9 @@ V2 官方权限配置没有在上述文档中提供可据以授权任意 Shell �
   用于合法 FileBridge heredoc；此时 OS 不授权任何业务根/CWD 写入，无 IPC 时仍拒绝 Shell。
 - IPC 或 ReadOnly 范围改变时停止空闲原生进程树，按新 profile 重启；会话从本实例 DB
   恢复。新 Run 不沿用旧 IPC 写权，不打断活动 Run 以改授权。
-- 无可用 sandbox-exec、非 macOS、根路径/硬链接检查失败时明确拒绝 Run；没有静默
-  无沙箱回退，也不把“禁用所有 Shell”当成正常编码功能通过。
+- macOS 上无可用 sandbox-exec 或 profile 初始化失败时明确拒绝 Run，没有静默无沙箱回退；
+  Windows/Linux 不启用 Teamva 的 OS 写入沙箱，进程权限交给 OpenCode 与操作系统。
+  只读/NoTools 仍由权限规则约束，不把“禁用所有 Shell”当成正常编码功能通过。
 
 ## 原始认证与会话校验启动
 

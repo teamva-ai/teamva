@@ -13,3 +13,7 @@ import (
 func lockTitleDirectory(directory *os.File) error {
 	return unix.Flock(int(directory.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 }
+
+func privateTitleDirectory(info os.FileInfo) bool {
+	return info.Mode().Perm()&0o077 == 0
+}

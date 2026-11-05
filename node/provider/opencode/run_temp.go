@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // runTempDirectory is host-created transport scratch space, never a repository
@@ -84,7 +85,9 @@ func (temp *runTempDirectory) validate() error {
 		}
 	}
 	current, err := os.Lstat(temp.path)
-	if err != nil || !current.IsDir() || current.Mode()&os.ModeSymlink != 0 || current.Mode().Perm() != 0o700 || !os.SameFile(current, temp.directory) {
+	// Windows reports directory modes as 0777; ACLs are the platform boundary.
+	if err != nil || !current.IsDir() || current.Mode()&os.ModeSymlink != 0 ||
+		(runtime.GOOS != "windows" && current.Mode().Perm() != 0o700) || !os.SameFile(current, temp.directory) {
 		return failure
 	}
 	canonical, err := filepath.EvalSymlinks(temp.path)

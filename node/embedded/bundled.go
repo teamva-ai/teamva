@@ -70,7 +70,10 @@ func bundledExecutable(id, command, dataDir string) string {
 	}
 	for _, candidate := range candidates {
 		info, err := os.Stat(candidate)
-		if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
+		if err != nil || info.IsDir() {
+			continue
+		}
+		if runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
 			continue
 		}
 		absolute, err := filepath.Abs(candidate)

@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"net/url"
+	"path/filepath"
 	goruntime "runtime"
+	"strings"
 
 	"github.com/wailsapp/wails/v2/pkg/menu"
 	"github.com/wailsapp/wails/v2/pkg/menu/keys"
@@ -78,7 +80,11 @@ func (a *desktopApp) openDataDirectory() {
 }
 
 func dataDirectoryURL(dataDir string) string {
-	return (&url.URL{Scheme: "file", Path: dataDir}).String()
+	slashed := filepath.ToSlash(dataDir)
+	if !strings.HasPrefix(slashed, "/") {
+		slashed = "/" + slashed
+	}
+	return (&url.URL{Scheme: "file", Path: slashed}).String()
 }
 
 func (a *desktopApp) showVersion() {

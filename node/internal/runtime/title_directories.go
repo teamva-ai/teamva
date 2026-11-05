@@ -56,7 +56,7 @@ func openTitleDirectoryOwner(workspaceRoot string) (_ *titleDirectoryOwner, resu
 		}
 	}()
 	info, err := directory.Stat()
-	if err != nil || !info.IsDir() || info.Mode().Perm()&0o077 != 0 {
+	if err != nil || !info.IsDir() || !privateTitleDirectory(info) {
 		return nil, errTitleGeneration
 	}
 	if err := lockTitleDirectory(directory); err != nil {
