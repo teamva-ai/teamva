@@ -39,6 +39,10 @@ type RunRequest struct {
 	DisableTools bool `json:"disable_tools,omitempty"`
 	// Host-created IPC directory, not a user/project writable repository.
 	ToolRequestDir string `json:"-"`
+	// Per-run MCP endpoint. When set, the provider should use it instead of
+	// the file bridge for Issue collaboration tools.
+	MCPURL   string `json:"-"`
+	MCPToken string `json:"-"`
 }
 
 type NativeSession struct {

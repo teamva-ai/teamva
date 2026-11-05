@@ -264,17 +264,17 @@ func (c *Client) run(ctx context.Context, request provider.RunRequest, sink prov
 		_, _ = io.Copy(io.Discard, stderrRead)
 		stderrResult <- redact.diagnosticText(strings.TrimSpace(string(data)))
 	}()
-	prompt := config.SystemPrompt + "\n" + workspaceInstructions + "\nYou run inside Teamva. Native tools, shell, hooks, skills, plugins and external MCP are disabled. Use only the teamva MCP tools. Paths are scoped by the host. For the file-based host protocol documented in the user prompt, call the corresponding named MCP tool with the same JSON arguments instead of writing request/reading response files. The tool returns the real receipt. An Issue public summary must use issue_comment_create; ordinary assistant text is not a public comment. Do not claim shell execution, git, tests, network access, unsupported tools or approvals happened."
+	protocolHint := "For the file-based host protocol documented in the user prompt, call the corresponding named MCP tool with the same JSON arguments instead of writing request/reading response files. The tool returns the real receipt."
+	if request.MCPURL != "" {
+		protocolHint = "Use the teamva-issue MCP server for Issue collaboration tools; it returns the real receipt. Use the teamva SDK server only for workspace files."
+	}
+	prompt := config.SystemPrompt + "\n" + workspaceInstructions + "\nYou run inside Teamva. Native tools, shell, hooks, skills, plugins and external MCP are disabled. Use only the teamva MCP tools. Paths are scoped by the host. " + protocolHint + " An Issue public summary must use issue_comment_create; ordinary assistant text is not a public comment. Do not claim shell execution, git, tests, network access, unsupported tools or approvals happened."
 	promptPath := filepath.Join(c.configDir, "system-prompt.txt")
 	if err := os.WriteFile(promptPath, []byte(prompt), 0o600); err != nil {
 		return session, errors.New("write claude system prompt failed")
 	}
 	args := []string{"--print", "--bare", "--disable-slash-commands", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--setting-sources=", "--strict-mcp-config", "--tools", "", "--permission-mode", "default", "--permission-prompt-tool", "stdio", "--system-prompt-file", promptPath}
-	mcp := `{"mcpServers":{}}`
-	if !scope.disabled {
-		mcp = `{"mcpServers":{"teamva":{"type":"sdk","name":"teamva"}}}`
-	}
-	args = append(args, "--mcp-config", mcp)
+	args = append(args, "--mcp-config", claudeMCPConfig(scope.disabled, request.MCPURL, request.MCPToken))
 	model := request.Model
 	if model == "" {
 		model = config.Model
@@ -740,4 +740,21 @@ func (c *Client) handleControl(ctx context.Context, a *activeRun, scope *toolSco
 		return errors.New("send Claude Code control response failed")
 	}
 	return nil
+}
+
+// claudeMCPConfig keeps workspace file tools on the SDK server and, when the
+// host provides one, adds the run-scoped Issue MCP server.
+func claudeMCPConfig(disabled bool, mcpURL, token string) string {
+	servers := map[string]any{}
+	if !disabled {
+		servers["teamva"] = map[string]any{"type": "sdk", "name": "teamva"}
+	}
+	if mcpURL != "" && token != "" {
+		servers["teamva-issue"] = map[string]any{
+			"type": "http", "url": mcpURL,
+			"headers": map[string]string{"Authorization": "Bearer " + token},
+		}
+	}
+	encoded, _ := json.Marshal(map[string]any{"mcpServers": servers})
+	return string(encoded)
 }

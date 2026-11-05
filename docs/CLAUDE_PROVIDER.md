@@ -4,7 +4,8 @@
 
 ## 能力与限制
 
-- 支持流式正文、上游实际公开的 thinking、原生 resume/session ID、interrupt、只读及 Issue FileBridge。
+- 支持流式正文、上游实际公开的 thinking、原生 resume/session ID、interrupt、只读及 Issue 协作工具。
+- Issue 工具优先使用 Runtime 提供的 Run 级 HTTP MCP（`teamva-issue`）；宿主未提供时才回退到 FileBridge。两种传输都由同一 ToolBroker 授权，模型不能传 run/issue 身份。
 - **不提供 Shell、Git、任意进程执行、网络工具、原生 Read/Write/Agent、用户 Skills、Computer Use、图片、steer、外部自定义 MCP 或用户审批升级**；未实现的能力不声明，配置不静默忽略。
 - 该版本不是任意 Shell 的操作系统沙箱；没有使用 `acceptEdits`、`bypassPermissions` 或危险跳过权限来冒充沙箱。CLI 原生工具集合严格设为空；唯一可调用工具由宿主 SDK MCP 实现，无工具子进程，不会让工具继承模型认证环境。
 - 文件工具只有 `read_file`、`list_directory`、`write_file`。读限制在 CWD 与实例授权仓库；写**只**允许显式 `WritableRepositories`（CWD 不隐式获得写权限）。ReadOnly 移除写工具并在调用端再次拒绝；DisableTools 连 SDK MCP 都不注册。
@@ -30,7 +31,7 @@
 
 `mcp_message` 的 `tools/call` 在执行任何文件/IPC 副作用之前，递归检查已 JSON 解码的 arguments 字符串键和值（含嵌套对象、数组和 Unicode escape）。若包含本次 `accountEnvironment` 投影的完整 API Key/Auth Token，返回安全 `isError` 工具回执，不执行调用、不改写参数、不写请求文件，也不终止整个 Run。不能只依靠可被 native 跳过的 `can_use_tool`。这只是已知投影凭据的最小防线，不扫描其它用户秘密，不承诺任意编码或跨工具编码 DLP；不含已知凭据的业务参数保持原样。
 
-宿主 FileBridge 的当前 `ToolRequestDir` 中已创建的固定工具目录才被映射为同名 SDK MCP 工具。调用原子发布唯一请求 JSON，最多等候 30 秒读取真实 `.response.json` 回执；工具目录不能由模型传入。ReadOnly 不映射业务写工具；DisableTools 不暴露 IPC。**Issue 公共总结仍必须调用 `issue_comment_create`**，普通 assistant 文本绝不转换为评论。
+回退路径中，宿主 FileBridge 的当前 `ToolRequestDir` 中已创建的固定工具目录才被映射为同名 SDK MCP 工具；调用原子发布唯一请求 JSON，最多等候 30 秒读取真实 `.response.json` 回执。MCP 路径则由 Runtime 直接启动 `teamva-issue` HTTP server，工具调用走同一 ToolBroker。ReadOnly 不暴露业务写工具；DisableTools 不启动任一通道。**Issue 公共总结仍必须调用 `issue_comment_create`**，普通 assistant 文本绝不转换为评论。
 
 Session ID 使用宿主生成 UUID；resume 同时校验当前实例 registry、真实原生 transcript 与 CWD，不能跨 workspace 恢复。子进程通过公共 process-tree/watchdog 管理，关闭或取消会收拢后代；interrupt 先发原生控制消息，未完成时进程树终止兜底。
 

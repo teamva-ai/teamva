@@ -7,7 +7,7 @@
   "install_hint": "安装官方 Claude Code CLI（需支持 --bare）。",
   "login_hint": "在 ~/.claude/settings.json 的 env 中配置 Anthropic 兼容 API 认证；托管实例不导入 OAuth 或 apiKeyHelper。",
   "docs_url": "https://code.claude.com/docs/en/headless",
-  "features": ["streaming", "resume", "interrupt", "read_only", "no_tools", "file_bridge"],
+  "features": ["streaming", "resume", "interrupt", "read_only", "no_tools", "file_bridge", "mcp_tools"],
   "diagnostic_steps": [
     {"id": "executable", "label": "CLI 可执行文件"},
     {"id": "version", "label": "CLI 隔离运行能力"},

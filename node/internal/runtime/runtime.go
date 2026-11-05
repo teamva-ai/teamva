@@ -1319,50 +1319,64 @@ func (r *Runtime) execute(ctx context.Context, command nodeprotocol.CommandEnvel
 		// 文件桥只提供 Issue 协作工具。计划任务等无 Issue Run 不应收到
 		// “必须发表评论”的说明，否则 Provider 会调用一个必然失败的工具并重试。
 		var selectedBridge *FileBridge
+		var mcpHost *runMCPHost
 		if (payload.IssueID != "" || payload.AssistantSessionID != "") && !payload.DisableTools {
 			broker := NewToolBroker(r.toolCaller, payload.RunID, payload.IssueID,
 				payload.IssueAgentInstanceID, payload.AgentID)
 			broker.workAssistant = payload.AssistantSessionID != ""
-			bridge, bridgeErr := NewFileBridge(request.CWD, payload.RunID, broker, log.New(os.Stderr, "bridge/", log.LstdFlags))
-			if bridgeErr != nil {
-				return nil, codedError("bridge_unavailable", "无法初始化工具桥接: "+bridgeErr.Error())
+			if payload.IssueID != "" && metadata.Supports("mcp_tools") {
+				host, hostErr := newRunMCPHost(ctx, broker, request.ReadOnly)
+				if hostErr == nil {
+					mcpHost = host
+					request.MCPURL, request.MCPToken = host.URL(), host.Token()
+					defer mcpHost.Close()
+				}
 			}
-			// 协作工具的文件协议动作对 Provider 是不透明的（写文件/跑命令），
-			// 前端会过滤这类内部路径。这里把每次工具调用投影成显式的
-			// provider.tool 事件，让用户在 Agent 会话时间线看到
-			// “发布评论/更新评论/读取任务”的真实过程。
-			bridge.SetToolEventReporter(func(tool, callID, status string, payload map[string]any) {
-				eventPayload := map[string]any{
-					"id": tool + ":" + callID, "request_id": callID, "tool": tool, "status": status,
-					"provider": "teamva",
+			if mcpHost == nil {
+				bridge, bridgeErr := NewFileBridge(request.CWD, payload.RunID, broker, log.New(os.Stderr, "bridge/", log.LstdFlags))
+				if bridgeErr != nil {
+					return nil, codedError("bridge_unavailable", "无法初始化工具桥接: "+bridgeErr.Error())
 				}
-				for key, value := range payload {
-					eventPayload[key] = value
-				}
-				_ = sink(ctx, adapter.Event{
-					Type: "provider.tool", Payload: eventPayload,
-					ProviderEventType: "filebridge.tool",
-					OccurredAt:        time.Now().UTC(),
+				// 协作工具的文件协议动作对 Provider 是不透明的（写文件/跑命令），
+				// 前端会过滤这类内部路径。这里把每次工具调用投影成显式的
+				// provider.tool 事件，让用户在 Agent 会话时间线看到
+				// “发布评论/更新评论/读取任务”的真实过程。
+				bridge.SetToolEventReporter(func(tool, callID, status string, payload map[string]any) {
+					eventPayload := map[string]any{
+						"id": tool + ":" + callID, "request_id": callID, "tool": tool, "status": status,
+						"provider": "teamva",
+					}
+					for key, value := range payload {
+						eventPayload[key] = value
+					}
+					_ = sink(ctx, adapter.Event{
+						Type: "provider.tool", Payload: eventPayload,
+						ProviderEventType: "filebridge.tool",
+						OccurredAt:        time.Now().UTC(),
+					})
 				})
-			})
-			selectedBridge = bridge
-			// Grant only this Run's host-created IPC directory. Providers must not
-			// need an implicit writable CWD or the parent transport directory to
-			// publish an Issue summary/delegation or read assistant history.
-			request.ToolRequestDir = bridge.root
-			if payload.AssistantSessionID != "" {
-				// Original-history tool responses are transient IPC, not a second
-				// history archive. Rooted removal cannot follow a planted symlink
-				// out of this private assistant workspace.
-				root, openErr := os.OpenRoot(request.CWD)
-				if openErr != nil {
-					return nil, openErr
+				selectedBridge = bridge
+				// Grant only this Run's host-created IPC directory. Providers must not
+				// need an implicit writable CWD or the parent transport directory to
+				// publish an Issue summary/delegation or read assistant history.
+				request.ToolRequestDir = bridge.root
+				if payload.AssistantSessionID != "" {
+					// Original-history tool responses are transient IPC, not a second
+					// history archive. Rooted removal cannot follow a planted symlink
+					// out of this private assistant workspace.
+					root, openErr := os.OpenRoot(request.CWD)
+					if openErr != nil {
+						return nil, openErr
+					}
+					defer root.Close()
+					defer func() { _ = root.RemoveAll(bridge.relativeRoot) }()
 				}
-				defer root.Close()
-				defer func() { _ = root.RemoveAll(bridge.relativeRoot) }()
+				if strings.TrimSpace(request.Prompt) != "" {
+					request.Prompt += "\n\n" + bridge.ToolsMarkdown()
+				}
 			}
-			if strings.TrimSpace(request.Prompt) != "" {
-				request.Prompt += "\n\n" + bridge.ToolsMarkdown()
+			if mcpHost != nil && strings.TrimSpace(request.Prompt) != "" {
+				request.Prompt += "\n\n" + issueMCPToolsMarkdown(payload.AgentID, request.ReadOnly)
 			}
 		}
 		if !metadata.Supports("resume") {

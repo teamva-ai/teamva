@@ -112,7 +112,7 @@ Agent 不自动改状态。
 
 ## 8. Agent 工具与 ToolBroker
 
-工具由 adapter/FileBridge 挂载，统一通过 **ToolBroker → 进程内 ToolCaller → ToolService → SQLite** 读写。
+工具由 adapter 挂载：支持 MCP 的 Provider 使用 Run 级 HTTP MCP，其余暂用 FileBridge；两者统一通过 **ToolBroker → 进程内 ToolCaller → ToolService → SQLite** 读写。
 请求保留 deadline、幂等键与 Run 作用域，不再经过远端 WebSocket/Node 凭据。工具作用域由当前 Run 自动绑定
 （user/computer/issue/instance/run），不接受 Agent 传入任意 issue_id。
 
