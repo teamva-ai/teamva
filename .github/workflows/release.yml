@@ -1,0 +1,308 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号，例如 0.4.0（会创建 v0.4.0 标签）"
+        required: true
+        type: string
+      prerelease:
+        description: "标记为预发布"
+        required: false
+        type: boolean
+        default: false
+      keep_draft:
+        description: "只构建并上传，保持草稿不公开"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      tag: ${{ steps.validate.outputs.tag }}
+      version: ${{ steps.validate.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version
+        id: validate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          VERSION="${INPUT_VERSION#v}"
+          if ! printf '%s' "$VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?(\+[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$'; then
+            echo "::error::版本号无效：${INPUT_VERSION}"
+            exit 1
+          fi
+          TAG="v$VERSION"
+          if git ls-remote --tags origin "refs/tags/$TAG" | grep -q .; then
+            echo "::error::标签 $TAG 已存在"
+            exit 1
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::Release $TAG 已存在"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # Tags are pushed before any artifact exists: the draft keeps partial
+      # builds invisible on the Releases page and download links.
+      - name: Create tag and draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.validate.outputs.tag }}
+          VERSION: ${{ steps.validate.outputs.version }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG"
+          git push origin "$TAG"
+
+          cat > /tmp/release-notes.md <<'NOTES'
+          # Teamva <VERSION>
+
+          ## 下载 / Downloads
+
+          - macOS（Apple Silicon 与 Intel）: `teamva-desktop-darwin-universal.dmg`
+          - Linux x86_64: `Teamva-<VERSION>-linux-x86_64.AppImage`
+          - Linux arm64: `Teamva-<VERSION>-linux-arm64.AppImage`
+          - 校验和 / Checksums: `sha256.txt`
+
+          ## 安装 / Install
+
+          ### macOS
+
+          打开 DMG，把 Teamva 拖进“应用程序”。应用未签名，首次打开会被 Gatekeeper 拦截：
+          右键应用选择“打开”，或执行下面的命令放行一次。
+
+          ```bash
+          sudo /usr/bin/xattr -rd com.apple.quarantine "/Applications/Teamva.app"
+          ```
+
+          ### Linux
+
+          ```bash
+          chmod +x Teamva-<VERSION>-linux-*.AppImage
+          ./Teamva-<VERSION>-linux-*.AppImage
+          ```
+
+          AppImage 需要 `libwebkit2gtk-4.1` 与 `libfuse2`（Ubuntu 24.04+ 为 `libfuse2t64`）。
+          没有 FUSE 时可改用 `--appimage-extract-and-run` 运行。
+
+          ---
+
+          Builds are produced by GitHub Actions from this repository. The macOS app is
+          unsigned and the Linux AppImage is unverified by the project; verify the
+          SHA-256 value in `sha256.txt` before running either.
+          NOTES
+          sed -i "s/<VERSION>/${VERSION}/g" /tmp/release-notes.md
+
+          args=(--draft --title "$TAG" --notes-file /tmp/release-notes.md --verify-tag)
+          if [ "$PRERELEASE" = "true" ]; then
+            args+=(--prerelease)
+          fi
+          gh release create "$TAG" "${args[@]}"
+
+  desktop:
+    needs: release
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # One universal DMG covers Apple Silicon and Intel. The build script
+          # already produces and validates the universal2 payload.
+          - runner: macos-latest
+            platform: mac
+            arch: universal
+          - runner: ubuntu-latest
+            platform: linux
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "11.8.0"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Build macOS app and DMG
+        if: matrix.platform == 'mac'
+        env:
+          TEAMVA_VERSION: ${{ needs.release.outputs.version }}
+          TEAMVA_OUTPUT_DIR: ${{ github.workspace }}/dist/release
+        run: ./scripts/release/build-desktop.sh
+
+      - name: Build Linux AppImage
+        if: matrix.platform == 'linux'
+        env:
+          TEAMVA_VERSION: ${{ needs.release.outputs.version }}
+        run: ./scripts/release/build-linux.sh ${{ matrix.arch }} "$GITHUB_WORKSPACE/dist/release"
+
+      - name: Upload installers to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release.outputs.tag }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          if [ "$PLATFORM" = "mac" ]; then
+            files=(dist/release/*.dmg dist/release/*.zip)
+          else
+            files=(dist/release/*.AppImage)
+          fi
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::no $PLATFORM installers were produced"
+            exit 1
+          fi
+          # Release uploads occasionally fail on runner network hiccups; --clobber
+          # makes a retry safe.
+          for attempt in 1 2 3; do
+            if gh release upload "$TAG" "${files[@]}" --clobber; then
+              exit 0
+            fi
+            echo "::warning::upload failed (attempt $attempt/3), retrying in 10s"
+            sleep 10
+          done
+          echo "::error::upload failed after 3 attempts"
+          exit 1
+
+      - name: Write checksum fragment
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/checksums
+          fragment="dist/checksums/sha256-${PLATFORM}-${ARCH}.txt"
+          if [ "$PLATFORM" = "mac" ]; then
+            (cd dist/release && shasum -a 256 teamva-desktop-darwin-universal.dmg teamva-desktop-darwin-universal.zip) > "$fragment"
+          else
+            cp dist/release/sha256.txt "$fragment"
+          fi
+          cat "$fragment"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checksums-${{ matrix.platform }}-${{ matrix.arch }}
+          path: dist/checksums/sha256-${{ matrix.platform }}-${{ matrix.arch }}.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  checksums:
+    needs: [release, desktop]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: checksums-*
+          merge-multiple: true
+          path: release-checksums
+
+      - name: Merge checksum fragments
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          fragments=(release-checksums/*.txt)
+          if [ ${#fragments[@]} -eq 0 ]; then
+            echo "::error::no checksum fragments were produced"
+            exit 1
+          fi
+          cat "${fragments[@]}" | LC_ALL=C sort -k 2 > sha256.txt
+          duplicated="$(awk '{ print $2 }' sha256.txt | uniq -d)"
+          if [ -n "$duplicated" ]; then
+            echo "::error::duplicate checksum entries for: $duplicated"
+            exit 1
+          fi
+          # Every platform must appear in the manifest before it goes public.
+          for pattern in \
+            '^[0-9a-f]{64}  teamva-desktop-darwin-universal\.dmg$' \
+            '^[0-9a-f]{64}  teamva-desktop-darwin-universal\.zip$' \
+            '^[0-9a-f]{64}  Teamva-[^ ]+-linux-x86_64\.AppImage$' \
+            '^[0-9a-f]{64}  Teamva-[^ ]+-linux-arm64\.AppImage$'; do
+            if ! grep -Eq "$pattern" sha256.txt; then
+              echo "::error::sha256.txt is missing an entry matching $pattern"
+              exit 1
+            fi
+          done
+          cat sha256.txt
+
+      - name: Upload merged checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if gh release upload "$TAG" sha256.txt --clobber --repo "$GITHUB_REPOSITORY"; then
+              exit 0
+            fi
+            echo "::warning::upload failed (attempt $attempt/3), retrying in 10s"
+            sleep 10
+          done
+          echo "::error::upload failed after 3 attempts"
+          exit 1
+
+  # Any failed platform keeps the release as a draft so a partial download set
+  # never appears under Releases or the website.
+  publish:
+    needs: [release, desktop, checksums]
+    if: ${{ always() && inputs.keep_draft != true && needs.release.result == 'success' && needs.desktop.result == 'success' && needs.checksums.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release.outputs.tag }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          args=(--draft=false --repo "$GITHUB_REPOSITORY")
+          if [ "$PRERELEASE" = "true" ]; then
+            args+=(--prerelease)
+          else
+            args+=(--latest)
+          fi
+          gh release edit "$TAG" "${args[@]}"

@@ -2,8 +2,8 @@
 
 ## 1. 当前发布目标
 
-当前只发布 macOS universal2 桌面 ZIP。首版不发布 Windows/Linux 包，也不依赖 Cloudflare、Docker、
-Pages 或单独安装的 CLI。
+当前发布 macOS universal2 桌面 ZIP/DMG 与 Linux x86_64/arm64 AppImage。首版不发布 Windows 包，也不依赖
+Cloudflare、Docker、Pages 或单独安装的 CLI。
 
 ## 2. 构建
 
