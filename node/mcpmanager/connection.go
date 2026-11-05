@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"syscall"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
@@ -81,18 +80,8 @@ func (m *Manager) connect(ctx context.Context, scope, projectID, name string, ha
 		}
 		cmd := exec.CommandContext(life, argv[0], argv[1:]...)
 		cmd.Stderr = io.Discard
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		cmd.WaitDelay = time.Second
-		cmd.Cancel = func() error {
-			if cmd.Process == nil {
-				return nil
-			}
-			err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-			if errors.Is(err, syscall.ESRCH) {
-				return os.ErrProcessDone
-			}
-			return err
-		}
+		prepareProcessCancellation(cmd)
 		cmd.Env = processEnvironment(c)
 		if cwd, ok := c["cwd"].(string); ok {
 			cmd.Dir = cwd

@@ -59,6 +59,19 @@ func TestBundledPlatformMatchesReleasePayloadNames(t *testing.T) {
 	}
 }
 
+func TestBundledCommandNameUsesWindowsExecutableSuffix(t *testing.T) {
+	for _, item := range []struct{ goos, command, want string }{
+		{"darwin", "opencode", "opencode"},
+		{"linux", "opencode", "opencode"},
+		{"windows", "opencode", "opencode.exe"},
+		{"windows", "opencode.exe", "opencode.exe"},
+	} {
+		if got := bundledCommandName(item.goos, item.command); got != item.want {
+			t.Errorf("bundledCommandName(%s, %s) = %q, want %q", item.goos, item.command, got, item.want)
+		}
+	}
+}
+
 func TestBundledExecutableMissing(t *testing.T) {
 	t.Chdir(t.TempDir())
 	if got := bundledExecutable("opencode", "opencode", ""); got != "" {

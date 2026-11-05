@@ -18,7 +18,6 @@ import (
 	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"golang.org/x/sys/unix"
 )
 
 var (
@@ -97,11 +96,13 @@ func New(c Config) (*Manager, error) {
 	if os.Chmod(dir, 0700) != nil {
 		return nil, ErrStorage
 	}
-	fd, err := unix.Open(filepath.Join(dir, "manager.lock"), unix.O_CREAT|unix.O_RDWR|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
+	lock, err := lockManagerFile(filepath.Join(dir, "manager.lock"))
+	if errors.Is(err, errManagerLocked) {
+		return nil, ErrConflict
+	}
 	if err != nil {
 		return nil, ErrStorage
 	}
-	lock := os.NewFile(uintptr(fd), "manager.lock")
 	if info, err := lock.Stat(); err != nil || !info.Mode().IsRegular() {
 		lock.Close()
 		return nil, ErrStorage
@@ -109,10 +110,6 @@ func New(c Config) (*Manager, error) {
 	if err = lock.Chmod(0600); err != nil {
 		lock.Close()
 		return nil, ErrStorage
-	}
-	if unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB) != nil {
-		lock.Close()
-		return nil, ErrConflict
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &Manager{dir: dir, lock: lock, entries: map[string]*entry{}, ctx: ctx, cancel: cancel}
@@ -452,8 +449,7 @@ func (m *Manager) Close() error {
 	for _, e := range m.entries {
 		stopEntry(e)
 	}
-	_ = unix.Flock(int(m.lock.Fd()), unix.LOCK_UN)
-	return m.lock.Close()
+	return closeManagerLock(m.lock)
 }
 
 func safeDir(path string) error {
@@ -476,19 +472,7 @@ func safeDir(path string) error {
 	}
 	return nil
 }
-func openPrivate(path string) (*os.File, error) {
-	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-	if err != nil {
-		return nil, err
-	}
-	f := os.NewFile(uintptr(fd), path)
-	i, err := f.Stat()
-	if err != nil || !i.Mode().IsRegular() || i.Mode().Perm()&0077 != 0 {
-		f.Close()
-		return nil, ErrStorage
-	}
-	return f, nil
-}
+
 func (m *Manager) persistLocked() error {
 	if safeDir(m.dir) != nil {
 		return ErrStorage
@@ -539,10 +523,5 @@ func (m *Manager) persistLocked() error {
 	if err != nil {
 		return ErrStorage
 	}
-	d, err := os.Open(m.dir)
-	if err != nil {
-		return ErrStorage
-	}
-	defer d.Close()
-	return d.Sync()
+	return syncDir(m.dir)
 }

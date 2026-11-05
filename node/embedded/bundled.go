@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // bundledExecutable resolves a provider runtime that ships with the app, or the
@@ -12,7 +13,8 @@ import (
 //
 //	<App>/Contents/Resources/<id>/<platform>/<command>
 //	<App>/Contents/Resources/<id>/<command>
-//	<repo>/vendor/<id>/<platform>/<command>   (walking up from CWD)
+//	<exe dir>/Resources/<id>/<platform>/<command>   (portable/installed Windows)
+//	<repo>/vendor/<id>/<platform>/<command>         (walking up from CWD)
 //	<dataDir>/providers/<id>/<platform>/<command>
 //
 // The returned path is absolute and executable, or empty when nothing is
@@ -29,23 +31,33 @@ func bundledPlatformName(goos, goarch string) string {
 	return goos + "-" + goarch
 }
 
+func bundledCommandName(goos, command string) string {
+	if goos == "windows" && !strings.HasSuffix(strings.ToLower(command), ".exe") {
+		return command + ".exe"
+	}
+	return command
+}
+
 func bundledExecutable(id, command, dataDir string) string {
 	if id == "" || command == "" {
 		return ""
 	}
 	platform := bundledPlatform()
-	candidates := make([]string, 0, 8)
+	binary := bundledCommandName(runtime.GOOS, command)
+	candidates := make([]string, 0, 10)
 	if executable, err := os.Executable(); err == nil {
 		dir := filepath.Dir(executable)
 		candidates = append(candidates,
-			filepath.Join(dir, "..", "Resources", id, platform, command),
-			filepath.Join(dir, "..", "Resources", id, command),
+			filepath.Join(dir, "..", "Resources", id, platform, binary),
+			filepath.Join(dir, "..", "Resources", id, binary),
+			filepath.Join(dir, "Resources", id, platform, binary),
+			filepath.Join(dir, "Resources", id, binary),
 		)
 	}
 	if cwd, err := os.Getwd(); err == nil {
 		dir := cwd
 		for depth := 0; depth < 6; depth++ {
-			candidates = append(candidates, filepath.Join(dir, "vendor", id, platform, command))
+			candidates = append(candidates, filepath.Join(dir, "vendor", id, platform, binary))
 			parent := filepath.Dir(dir)
 			if parent == dir {
 				break
@@ -54,7 +66,7 @@ func bundledExecutable(id, command, dataDir string) string {
 		}
 	}
 	if dataDir != "" {
-		candidates = append(candidates, filepath.Join(dataDir, "providers", id, platform, command))
+		candidates = append(candidates, filepath.Join(dataDir, "providers", id, platform, binary))
 	}
 	for _, candidate := range candidates {
 		info, err := os.Stat(candidate)
