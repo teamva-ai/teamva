@@ -1,0 +1,16 @@
+{
+  "api_version": 1,
+  "id": "claude",
+  "display_name": "Claude Code",
+  "command": "claude",
+  "description": "隔离的 Claude Code 双向 SDK 接入；仅开放受控文件与任务协作工具，不开放 Shell、插件或外部 MCP。",
+  "install_hint": "安装官方 Claude Code CLI（需支持 --bare）。",
+  "login_hint": "在 ~/.claude/settings.json 的 env 中配置 Anthropic 兼容 API 认证；托管实例不导入 OAuth 或 apiKeyHelper。",
+  "docs_url": "https://code.claude.com/docs/en/headless",
+  "features": ["streaming", "resume", "interrupt", "read_only", "no_tools", "file_bridge"],
+  "diagnostic_steps": [
+    {"id": "executable", "label": "CLI 可执行文件"},
+    {"id": "version", "label": "CLI 隔离运行能力"},
+    {"id": "authentication", "label": "隔离实例 API 认证"}
+  ]
+}

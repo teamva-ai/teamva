@@ -1,0 +1,85 @@
+# macOS and editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+.dev.vars
+.teamva/
+# Pre-rename local worktree data; kept so an existing checkout never stages it.
+.agentsmaster/
+*.pem
+*.key
+*.p12
+deploy/certs/
+deploy/docker/secrets/
+
+# JavaScript
+node_modules/
+.pnpm-store/
+web/dist/
+web/.svelte-kit/
+web/.vite/
+web/.rspack-cache/
+web/test-results/
+web/playwright-report/
+web/public/downloads/
+website/dist/
+website/.vite/
+desktop/frontend/wailsjs/
+desktop/build/bin/
+coverage/
+*.tsbuildinfo
+
+# Go
+bin/
+dist/
+*.test
+*.out
+*.prof
+*.coverprofile
+/teamva-api
+/teamva
+/teamva-worker
+
+# Runtime data
+runtime.json
+.teamva.lock
+.agentsmaster.lock
+# Untracked remnants of the removed deployment prototypes stay private.
+deploy/
+.wrangler/
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+tmp/
+
+# Generated protocol bindings
+protocol/gen/
+
+# Logs and diagnostics
+*.log
+*.pid
+*.sock
+diagnostics/
+.redocly/
+
+# Wails embeds the generated Web build, but a placeholder keeps clean clones
+# compilable before the staging script is run.
+!desktop/frontend/dist/
+desktop/frontend/dist/*
+!desktop/frontend/dist/.gitkeep
+
+# go build default output name inside desktop/
+desktop/desktop
+
+# 拉取的 Provider 运行时（scripts/vendor/opencode.sh）
+vendor/opencode/

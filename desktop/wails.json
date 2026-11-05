@@ -1,0 +1,18 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "Teamva",
+  "outputfilename": "Teamva",
+  "frontend:dir": "frontend",
+  "frontend:install": "",
+  "frontend:build": "../../scripts/desktop/stage-frontend.sh",
+  "wailsjsdir": "frontend",
+  "author": {
+    "name": "Teamva",
+    "email": ""
+  },
+  "info": {
+    "companyName": "Teamva",
+    "productName": "Teamva",
+    "productVersion": "0.0.0"
+  }
+}

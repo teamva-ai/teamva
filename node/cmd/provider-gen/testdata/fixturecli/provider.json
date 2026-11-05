@@ -1,0 +1,8 @@
+{
+  "api_version": 1,
+  "id": "fixturecli",
+  "display_name": "Fixture CLI (test only)",
+  "command": "fixturecli",
+  "description": "A test-only minimal provider, never installed in the application.",
+  "features": ["streaming"]
+}

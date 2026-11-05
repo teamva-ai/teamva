@@ -1,0 +1,39 @@
+Teamva
+Copyright 2026 Teamva contributors
+
+Project-declared source repository:
+https://github.com/teamva-ai/teamva
+
+The source identifier above follows the Go module paths distributed with this
+project. It identifies the project's declared origin, not a promise that a
+public repository or hosted service is currently available at that address.
+
+Original Teamva branding and logo artwork:
+The Teamva Silken mark is the project's original eightfold rotational logo.
+Its source and derived representations in this distribution include:
+  assets/brand/icon.png
+  desktop/build/appicon.svg
+  desktop/build/appicon.png
+  desktop/build/appicon.icns
+  desktop/build/icon_installer.icns
+  desktop/build/dmg_background.png
+  desktop/build/dmg_background@2x.png
+  desktop/bootstrap/assets/brand-icon.png
+  web/public/favicon.png
+  website/public/favicon.png
+
+Copyright 2026 Teamva contributors applies to this original artwork.
+The names and artwork identify the origin of the project. Apache License 2.0
+does not grant trademark rights beyond the uses described in Section 6.
+
+This product includes material adapted from OpenChamber,
+Copyright (c) 2025 Bohdan Triapitsyn, licensed under the MIT License,
+and uses @pierre/diffs, Copyright 2025 Pierre Computer Company,
+licensed under the Apache License, Version 2.0.
+See THIRD_PARTY_NOTICES.md for the applicable notices and license terms.
+Dependencies remain subject to their own licenses.
+
+This NOTICE is for attribution and informational purposes only. It does not
+modify the Apache License, Version 2.0, or add a requirement to retain or
+display logo image files. Preserve applicable attribution notices when
+redistributing, as required by Section 4 and applicable third-party licenses.

@@ -1,0 +1,19 @@
+{
+  "api_version": 1,
+  "id": "codex",
+  "display_name": "Codex",
+  "command": "codex",
+  "description": "OpenAI Codex app-server integration",
+  "description_key": "programmingTools.codexDesc",
+  "install_hint": "npm install -g @openai/codex",
+  "login_hint": "codex login",
+  "docs_url": "https://github.com/openai/codex",
+  "features": ["streaming", "resume", "interrupt", "approval", "steer", "images", "read_only", "skills", "computer_use", "file_bridge"],
+  "diagnostic_steps": [
+    {"id": "executable", "label": "CLI executable"},
+    {"id": "version", "label": "CLI version"},
+    {"id": "server", "label": "App server"},
+    {"id": "authentication", "label": "Authentication"},
+    {"id": "models", "label": "Models"}
+  ]
+}

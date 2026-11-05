@@ -1,0 +1,402 @@
+import type { SupportedLocale } from "../lib/types";
+
+// Feature-local dictionaries keep the nine translations side by side.
+const locales: SupportedLocale[] = [
+  "zh-CN",
+  "zh-TW",
+  "en-US",
+  "ja-JP",
+  "de-DE",
+  "fr-FR",
+  "es-ES",
+  "pt-BR",
+  "ru-RU"
+];
+const rows: Record<string, string[]> = {
+  meetLumi: ["认识 Lumi", "認識 Lumi", "Meet Lumi", "Lumi の紹介", "Lumi kennenlernen", "Découvrez Lumi", "Conoce a Lumi", "Conheça Lumi", "Знакомство с Lumi"],
+  lumiBuiltin: ["Lumi 是内置 Agent，不能被删除；可像普通 Agent 一样配置，参与任务和定时任务。", "Lumi 是內建 Agent，無法刪除；可像一般 Agent 一樣設定，參與任務和定時任務。", "Lumi is a built-in Agent that cannot be deleted. Configure it and use it for tasks and schedules like any other Agent.", "Lumi は削除できない内蔵 Agent です。通常の Agent と同様に設定し、タスクや定期タスクで使用できます。", "Lumi ist ein integrierter Agent, der nicht gelöscht werden kann. Er lässt sich wie jeder andere Agent konfigurieren und für Aufgaben sowie Zeitpläne nutzen.", "Lumi est un Agent intégré non supprimable. Configurez-le et utilisez-le pour les tâches et les planifications comme tout autre Agent.", "Lumi es un Agent integrado que no se puede eliminar. Configúralo y úsalo para tareas y programaciones como cualquier otro Agent.", "Lumi é um Agent integrado que não pode ser excluído. Configure-o e use-o para tarefas e agendamentos como qualquer outro Agent.", "Lumi — встроенный Agent, который нельзя удалить. Настройте его и используйте для задач и расписаний как обычный Agent."],
+  bundledOpenCode: ["没有安装 Coding Agent 也没关系：应用已内置 OpenCode，无需额外安装。", "沒有安裝 Coding Agent 也沒關係：應用程式已內建 OpenCode，無需額外安裝。", "No coding agent installed? OpenCode is bundled with the app; no extra installation is needed.", "Coding Agent が未インストールでも、内蔵の OpenCode を追加インストールなしで利用できます。", "Kein Coding Agent installiert? OpenCode ist bereits integriert.", "Aucun Coding Agent installé ? OpenCode est déjà intégré à l’application.", "¿No tienes un Coding Agent? OpenCode ya viene incluido.", "Sem Coding Agent instalado? O OpenCode já vem incluído.", "Нет установленного Coding Agent? OpenCode уже входит в приложение."],
+  defaultOpenCodeModel: ["当前使用 OpenCode 默认模型。模型可用性由 OpenCode 决定；没有可用模型时，可在下方添加自己的大模型 API。", "目前使用 OpenCode 預設模型。可用性由 OpenCode 決定；沒有可用模型時，可在下方新增自己的大模型 API。", "Using OpenCode’s default model. Availability depends on OpenCode; add your own model API below if none is available.", "OpenCode の既定モデルを使用します。利用可能なモデルがなければ、下から独自の API を追加できます。", "Das Standardmodell von OpenCode wird verwendet. Falls keines verfügbar ist, füge unten deine eigene Modell-API hinzu.", "Le modèle par défaut d’OpenCode est utilisé. S’il n’est pas disponible, ajoutez votre propre API ci-dessous.", "Se usa el modelo predeterminado de OpenCode. Si no hay ninguno disponible, añade tu propia API abajo.", "Usando o modelo padrão do OpenCode. Se não houver modelo disponível, adicione sua API abaixo.", "Используется модель OpenCode по умолчанию. Если доступных моделей нет, добавьте свой API ниже."],
+  addModelProvider: ["添加大模型供应商", "新增大模型供應商", "Add a model provider", "モデルプロバイダーを追加", "Modellanbieter hinzufügen", "Ajouter un fournisseur de modèles", "Añadir proveedor de modelos", "Adicionar provedor de modelos", "Добавить провайдера моделей"],
+  stepAPI: ["配置大模型 API", "設定大模型 API", "Configure model API", "モデル API の設定", "Modell-API einrichten", "Configurer l’API du modèle", "Configurar API del modelo", "Configurar API do modelo", "Настройка API модели"],
+  apiDescription: ["选择供应商、填写模型和 API Key。供应商保存后会填入当前 Agent 的配置，请再保存 Agent 使配置生效。", "選擇供應商、填寫模型與 API Key。儲存後會填入目前 Agent 的設定，請再儲存 Agent 使設定生效。", "Choose a provider, model and API key. Saving selects it in the current Agent’s draft; save the Agent to apply the configuration.", "プロバイダー、モデル、API キーを入力します。保存後、現在の Agent の下書きに反映されます。Agent も保存してください。", "Anbieter, Modell und Schlüssel eingeben. Speichern wählt das Modell im Agent-Entwurf; danach den Agent speichern.", "Choisissez le fournisseur, le modèle et la clé. L’enregistrement remplit le brouillon ; enregistrez ensuite l’Agent.", "Elige proveedor, modelo y clave. Se seleccionará en el borrador; guarda después el Agent para aplicarlo.", "Escolha provedor, modelo e chave. O modelo será selecionado no rascunho; salve o Agent para aplicar.", "Укажите провайдера, модель и ключ. Модель появится в черновике; сохраните Agent для применения."],
+  apiProvider: ["模型供应商", "模型供應商", "Model provider", "モデルプロバイダー", "Modellanbieter", "Fournisseur du modèle", "Proveedor del modelo", "Provedor do modelo", "Провайдер модели"],
+  apiCustom: ["自定义 / OpenAI 兼容", "自訂 / OpenAI 相容", "Custom / OpenAI compatible", "カスタム / OpenAI 互換", "Benutzerdefiniert / OpenAI-kompatibel", "Personnalisé / compatible OpenAI", "Personalizado / compatible OpenAI", "Personalizado / compatível com OpenAI", "Свой / совместимый с OpenAI"],
+  apiBaseURL: ["API 地址（Base URL）", "API 位址（Base URL）", "API base URL", "API ベース URL", "API-Basis-URL", "URL de base de l’API", "URL base de la API", "URL base da API", "Базовый URL API"],
+  apiModel: ["模型 ID", "模型 ID", "Model ID", "モデル ID", "Modell-ID", "ID du modèle", "ID del modelo", "ID do modelo", "ID модели"],
+  apiModelHint: ["预设模型仅供填写参考，请以供应商为你的账号开放的模型 ID 为准；可直接修改。", "預設模型僅供填寫參考，請以供應商為帳號開放的模型 ID 為準；可直接修改。", "Suggested model IDs are examples. Use a model enabled for your account; the field is editable.", "候補は入力例です。アカウントで利用可能なモデル ID に変更してください。", "Vorgeschlagene IDs sind Beispiele. Trage ein für dein Konto verfügbares Modell ein.", "Les modèles suggérés sont des exemples. Saisissez un ID disponible pour votre compte.", "Los IDs sugeridos son ejemplos. Usa un modelo habilitado para tu cuenta.", "Os IDs sugeridos são exemplos. Use um modelo habilitado em sua conta.", "Предложенные ID — примеры. Укажите модель, доступную вашему аккаунту."],
+  apiKeyRetained: ["已保存密钥；留空保留", "已儲存金鑰；留空保留", "Key saved; leave blank to keep", "保存済み。空欄で保持", "Gespeichert; leer lassen zum Behalten", "Clé enregistrée ; laisser vide pour conserver", "Clave guardada; deja vacío para conservar", "Chave salva; deixe vazio para manter", "Ключ сохранён; оставьте пустым для сохранения"],
+  apiPrivacy: ["密钥仅保存在本机 OpenCode 私有配置，不会回显或写入日志。测试会向此地址发送一次 Hello，可能产生少量费用；不会自动测试。", "金鑰僅儲存於本機 OpenCode 私有設定，不會回顯或寫入日誌。測試會傳送一次 Hello，可能產生少量費用；不會自動測試。", "Keys stay in private local OpenCode configuration and are never echoed or logged. Testing sends one Hello to this URL and may incur a small charge. It never runs automatically.", "キーはローカルの非公開設定にのみ保存します。テストは指定先へ Hello を1回送り、少額の料金が発生する場合があります。自動送信はしません。", "Schlüssel bleiben lokal und privat. Ein Test sendet einmal Hello an diese URL und kann geringe Kosten verursachen. Kein automatischer Test.", "Les clés restent privées et locales. Le test envoie un seul Hello à cette URL et peut entraîner un faible coût. Aucun test automatique.", "Las claves quedan privadas en este equipo. La prueba envía un único Hello a esta URL y puede tener un pequeño coste. No se prueba automáticamente.", "As chaves ficam privadas neste computador. O teste envia um Hello a esta URL e pode gerar pequeno custo. Nunca é automático.", "Ключ хранится локально и не выводится в журнал. Тест отправляет один Hello по этому URL и может стоить небольшую сумму. Автотестов нет."],
+  apiTest: ["测试连接（发送 Hello）", "測試連線（傳送 Hello）", "Test connection (send Hello)", "接続テスト（Hello を送信）", "Verbindung testen (Hello senden)", "Tester la connexion (envoyer Hello)", "Probar conexión (enviar Hello)", "Testar conexão (enviar Hello)", "Проверить соединение (отправить Hello)"],
+  apiSave: ["保存供应商并选择模型", "儲存供應商並選擇模型", "Save provider and select model", "保存してモデルを選択", "Anbieter speichern und Modell wählen", "Enregistrer et choisir le modèle", "Guardar proveedor y elegir modelo", "Salvar provedor e escolher modelo", "Сохранить провайдера и выбрать модель"],
+  apiRuntimeUnavailable: ["内置 OpenCode 尚未就绪，请在设置的编程 CLI 页检查。", "內建 OpenCode 尚未就緒，請在設定的程式 CLI 頁檢查。", "Bundled OpenCode is not ready. Check Coding CLIs in Settings.", "内蔵 OpenCode の準備ができていません。設定の CLI ページを確認してください。", "OpenCode ist nicht bereit. Coding-CLIs in Einstellungen prüfen.", "OpenCode n’est pas prêt. Vérifiez les CLI dans les paramètres.", "OpenCode no está listo. Revisa CLI en Ajustes.", "O OpenCode não está pronto. Verifique CLI em Configurações.", "OpenCode не готов. Проверьте CLI в настройках."],
+  apiTest_success: ["连接成功，模型已响应 Hello。", "連線成功，模型已回應 Hello。", "Connected: the model responded to Hello.", "接続成功。モデルが Hello に応答しました。", "Verbunden: Das Modell hat auf Hello geantwortet.", "Connexion réussie : le modèle a répondu à Hello.", "Conexión correcta: el modelo respondió a Hello.", "Conectado: o modelo respondeu ao Hello.", "Соединение установлено: модель ответила на Hello."],
+  apiTest_authentication_failed: ["认证失败，请检查 API Key 与 API 地址。", "驗證失敗，請檢查 API Key 與 API 位址。", "Authentication failed. Check your API key and URL.", "認証失敗。API キーと URL を確認してください。", "Anmeldung fehlgeschlagen. Schlüssel und URL prüfen.", "Authentification échouée. Vérifiez la clé et l’URL.", "Error de autenticación. Revisa clave y URL.", "Falha de autenticação. Verifique chave e URL.", "Ошибка аутентификации. Проверьте ключ и URL."],
+  apiTest_rate_limited: ["供应商限流或额度不足，请稍后重试并检查余额。", "供應商限流或額度不足，請稍後重試並檢查餘額。", "Rate limited or quota exhausted. Check your balance and retry later.", "レート制限または上限に達しました。残高を確認して再試行してください。", "Limit oder Kontingent erreicht. Guthaben prüfen und später erneut versuchen.", "Limite ou quota atteint. Vérifiez le solde et réessayez plus tard.", "Límite o cuota agotada. Revisa el saldo y prueba más tarde.", "Limite ou cota esgotada. Confira o saldo e tente mais tarde.", "Лимит запросов или квота исчерпаны. Проверьте баланс и повторите позже."],
+  apiTest_request_failed: ["请求失败，请检查 API 地址、模型 ID 及账号权限。", "請求失敗，請檢查 API 位址、模型 ID 與帳號權限。", "Request failed. Check the API URL, model ID and account access.", "リクエスト失敗。URL、モデル ID、権限を確認してください。", "Anfrage fehlgeschlagen. URL, Modell-ID und Zugriff prüfen.", "Échec de la requête. Vérifiez l’URL, le modèle et les autorisations.", "Error en la solicitud. Revisa URL, modelo y permisos.", "Falha na solicitação. Verifique URL, modelo e permissões.", "Ошибка запроса. Проверьте URL, ID модели и права аккаунта."],
+  apiTest_unreachable: ["无法连接，请检查网络与 API 地址。", "無法連線，請檢查網路與 API 位址。", "Cannot connect. Check the network and API URL.", "接続できません。ネットワークと URL を確認してください。", "Keine Verbindung. Netzwerk und URL prüfen.", "Connexion impossible. Vérifiez le réseau et l’URL.", "No se puede conectar. Revisa la red y URL.", "Não foi possível conectar. Verifique rede e URL.", "Нет соединения. Проверьте сеть и URL."],
+  apiTest_timeout: ["测试超时，请检查网络后重试。", "測試逾時，請檢查網路後重試。", "Test timed out. Check your connection and retry.", "テストがタイムアウトしました。接続を確認してください。", "Zeitüberschreitung. Verbindung prüfen und erneut versuchen.", "Test expiré. Vérifiez la connexion et réessayez.", "La prueba agotó el tiempo. Revisa la conexión.", "O teste expirou. Verifique a conexão e tente novamente.", "Время теста истекло. Проверьте соединение."],
+  apiTest_invalid_response: ["接口未返回有效的模型回复，请检查兼容协议和模型 ID。", "介面未回傳有效模型回覆，請檢查相容協定與模型 ID。", "No valid model reply. Check the API protocol and model ID.", "有効なモデル応答がありません。API 形式とモデル ID を確認してください。", "Keine gültige Modellantwort. Protokoll und Modell-ID prüfen.", "Aucune réponse valide. Vérifiez le protocole et le modèle.", "Respuesta de modelo no válida. Revisa protocolo y modelo.", "Resposta do modelo inválida. Verifique protocolo e modelo.", "Нет корректного ответа модели. Проверьте протокол и ID."],
+  settingsTab: [
+    "编程 CLI",
+    "程式 CLI",
+    "Coding CLIs",
+    "コーディング CLI",
+    "Coding-CLIs",
+    "CLI de codage",
+    "CLI de programación",
+    "CLIs de programação",
+    "CLI для программирования"
+  ],
+  settingsCliDesc: [
+    "检测本机编程 CLI 的安装、登录与模型状态。",
+    "檢測本機程式 CLI 的安裝、登入與模型狀態。",
+    "Check installation, sign-in and model status of the local coding CLIs.",
+    "本機コーディング CLI のインストール・ログイン・モデル状態を確認します。",
+    "Installation, Anmeldung und Modellstatus der lokalen Coding-CLIs prüfen.",
+    "Vérifier l’installation, la connexion et les modèles des CLI de codage locales.",
+    "Comprueba instalación, sesión y modelos de los CLI locales.",
+    "Verifique instalação, login e modelos dos CLIs locais.",
+    "Проверка установки, входа и моделей локальных CLI."
+  ],
+  rerun: [
+    "重新运行引导",
+    "重新執行引導",
+    "Run setup guide again",
+    "セットアップをもう一度実行",
+    "Einrichtung erneut starten",
+    "Relancer la configuration",
+    "Volver a ejecutar la guía",
+    "Executar guia novamente",
+    "Запустить настройку снова"
+  ],
+  title: [
+    "初始配置",
+    "初始設定",
+    "Initial setup",
+    "初期設定",
+    "Ersteinrichtung",
+    "Configuration initiale",
+    "Configuración inicial",
+    "Configuração inicial",
+    "Первоначальная настройка"
+  ],
+  subtitle: [
+    "检查编程工具，认识 Lumi。所有 Agent 统一在 Agents 页面配置。",
+    "檢查程式工具、認識 Lumi。所有 Agent 統一在 Agents 頁面設定。",
+    "Check coding tools and meet Lumi. Configure every Agent on the Agents page.",
+    "ツールを確認し、Lumi を紹介します。すべての Agent は Agents ページで設定します。",
+    "Prüfe Coding-Tools und lerne Lumi kennen. Alle Agents werden auf der Agents-Seite eingerichtet.",
+    "Vérifiez les outils et découvrez Lumi. Configurez tous les Agents sur la page Agents.",
+    "Comprueba las herramientas y conoce a Lumi. Configura todos los Agents en la página Agents.",
+    "Verifique ferramentas e conheça Lumi. Configure todos os Agents na página Agents.",
+    "Проверьте инструменты и познакомьтесь с Lumi. Все агенты настраиваются на странице Agents."
+  ],
+  stepCli: [
+    "编程 CLI",
+    "程式 CLI",
+    "Coding CLI",
+    "コーディング CLI",
+    "Coding-CLI",
+    "CLI de codage",
+    "CLI de programación",
+    "CLI de programação",
+    "CLI"
+  ],
+  stepGeneral: [
+    "Lumi",
+    "Lumi",
+    "Lumi",
+    "Lumi",
+    "Lumi",
+    "Lumi",
+    "Lumi",
+    "Lumi",
+    "Lumi"
+  ],
+  stepAgent: [
+    "其他 Agent",
+    "其他 Agent",
+    "Other Agents",
+    "その他の Agent",
+    "Weitere Agents",
+    "Autres Agents",
+    "Otros Agents",
+    "Outros Agents",
+    "Другие Agent"
+  ],
+  stepCliDesc: [
+    "自动检测本机的编程 CLI；未安装或未登录时按提示在终端完成后重新检测。",
+    "自動檢測本機程式 CLI；未安裝或未登入時依提示在終端完成後重新檢測。",
+    "Local coding CLIs are detected automatically. If one is missing or signed out, finish in a terminal and re-check.",
+    "本機のコーディング CLI を自動検出します。未インストール・未ログインの場合はターミナルで完了後に再検出してください。",
+    "Lokale Coding-CLIs werden automatisch erkannt. Falls nicht installiert oder angemeldet, im Terminal abschließen und erneut prüfen.",
+    "Les CLI locales sont détectées automatiquement. Si l’une manque ou n’est pas connectée, terminez dans un terminal puis relancez la détection.",
+    "Los CLI locales se detectan automáticamente. Si falta instalar o iniciar sesión, complétalo en una terminal y vuelve a comprobar.",
+    "Os CLIs locais são detectados automaticamente. Se faltar instalar ou entrar, conclua no terminal e verifique novamente.",
+    "Локальные CLI определяются автоматически. Если не установлен или не выполнен вход — завершите в терминале и повторите проверку."
+  ],
+  stepGeneralDesc: [
+    "Lumi 用于工作记录与灵感助手；选择 Provider 和模型。",
+    "Lumi 用於工作紀錄與靈感助手；選擇 Provider 與模型。",
+    "Lumi powers the work history and inspiration assistants. Choose a provider and model.",
+    "Lumi は作業履歴とインスピレーションのアシスタントに使われます。Provider とモデルを選択してください。",
+    "Lumi versorgt Arbeitsverlauf und Ideen-Assistent. Provider und Modell wählen.",
+    "Lumi alimente l’historique de travail et l’assistant d’inspirations. Choisissez un Provider et un modèle.",
+    "Lumi alimenta el historial de trabajo y el asistente de inspiraciones. Elige Provider y modelo.",
+    "Lumi alimenta o histórico de trabalho e o assistente de inspirações. Escolha Provider e modelo.",
+    "Lumi используется историей работы и помощником идей. Выберите Provider и модель."
+  ],
+  stepAgentDesc: [
+    "创建至少一个可用的 Agent；也可以跳过此步。",
+    "建立至少一個可用的 Agent；也可以跳過此步。",
+    "Create at least one usable Agent, or skip this step.",
+    "使用可能な Agent を 1 つ以上作成します。このステップはスキップできます。",
+    "Mindestens einen nutzbaren Agent erstellen – oder diesen Schritt überspringen.",
+    "Créez au moins un Agent utilisable, ou passez cette étape.",
+    "Crea al menos un Agent utilizable, o salta este paso.",
+    "Crie pelo menos um Agent utilizável, ou pule esta etapa.",
+    "Создайте хотя бы один рабочий Agent или пропустите шаг."
+  ],
+  providersLoading: [
+    "正在加载 Provider…",
+    "正在載入 Provider…",
+    "Loading providers…",
+    "Provider を読み込み中…",
+    "Provider werden geladen…",
+    "Chargement des Provider…",
+    "Cargando Provider…",
+    "Carregando Providers…",
+    "Загрузка Provider…"
+  ],
+  next: ["下一步", "下一步", "Next", "次へ", "Weiter", "Suivant", "Siguiente", "Avançar", "Далее"],
+  back: ["上一步", "上一步", "Back", "戻る", "Zurück", "Précédent", "Atrás", "Voltar", "Назад"],
+  skipAll: [
+    "暂时跳过",
+    "暫時跳過",
+    "Skip for now",
+    "後でスキップ",
+    "Vorerst überspringen",
+    "Passer pour l’instant",
+    "Saltar por ahora",
+    "Pular por enquanto",
+    "Пропустить пока"
+  ],
+  finish: [
+    "进入任务",
+    "進入任務",
+    "Open tasks",
+    "タスクを開く",
+    "Aufgaben öffnen",
+    "Ouvrir les tâches",
+    "Abrir tareas",
+    "Abrir tarefas",
+    "Открыть задачи"
+  ],
+  selectProvider: [
+    "选择 Provider",
+    "選擇 Provider",
+    "Provider",
+    "Provider",
+    "Provider",
+    "Provider",
+    "Provider",
+    "Provider",
+    "Provider"
+  ],
+  model: [
+    "模型（留空使用默认）",
+    "模型（留空使用預設）",
+    "Model (empty uses the default)",
+    "モデル（空欄は既定値）",
+    "Modell (leer = Standard)",
+    "Modèle (vide = défaut)",
+    "Modelo (vacío usa el predeterminado)",
+    "Modelo (vazio usa o padrão)",
+    "Модель (пусто — по умолчанию)"
+  ],
+  saveGeneral: [
+    "保存配置",
+    "儲存設定",
+    "Save configuration",
+    "設定を保存",
+    "Konfiguration speichern",
+    "Enregistrer",
+    "Guardar configuración",
+    "Salvar configuração",
+    "Сохранить настройки"
+  ],
+  generalSaved: [
+    "已保存",
+    "已儲存",
+    "Saved",
+    "保存しました",
+    "Gespeichert",
+    "Enregistré",
+    "Guardado",
+    "Salvo",
+    "Сохранено"
+  ],
+  generalSaving: [
+    "正在保存…",
+    "正在儲存…",
+    "Saving…",
+    "保存中…",
+    "Wird gespeichert…",
+    "Enregistrement…",
+    "Guardando…",
+    "Salvando…",
+    "Сохранение…"
+  ],
+  generalUnready: [
+    "该 CLI 尚未就绪：先完成安装或登录，助手对话需要就绪的 CLI。",
+    "此 CLI 尚未就緒：請先完成安裝或登入；助手對話需要就緒的 CLI。",
+    "This CLI is not ready yet. Finish installation or sign-in first; assistant chats need a ready CLI.",
+    "この CLI はまだ準備できていません。先にインストールまたはログインを完了してください。",
+    "Diese CLI ist noch nicht bereit. Zuerst Installation oder Anmeldung abschließen.",
+    "Cette CLI n’est pas encore prête. Terminez d’abord l’installation ou la connexion.",
+    "Este CLI aún no está listo. Completa primero la instalación o el inicio de sesión.",
+    "Este CLI ainda não está pronto. Conclua a instalação ou o login primeiro.",
+    "Этот CLI ещё не готов. Сначала завершите установку или вход."
+  ],
+  agentName: ["名称", "名稱", "Name", "名前", "Name", "Nom", "Nombre", "Nome", "Название"],
+  agentCli: [
+    "编程 CLI",
+    "程式 CLI",
+    "Coding CLI",
+    "コーディング CLI",
+    "Coding-CLI",
+    "CLI de codage",
+    "CLI de programación",
+    "CLI de programação",
+    "CLI"
+  ],
+  agentModel: [
+    "模型（可选）",
+    "模型（選填）",
+    "Model (optional)",
+    "モデル（任意）",
+    "Modell (optional)",
+    "Modèle (facultatif)",
+    "Modelo (opcional)",
+    "Modelo (opcional)",
+    "Модель (необязательно)"
+  ],
+  agentPrompt: [
+    "系统提示词（可选）",
+    "系統提示詞（選填）",
+    "System prompt (optional)",
+    "システムプロンプト（任意）",
+    "System-Prompt (optional)",
+    "Prompt système (facultatif)",
+    "Prompt del sistema (opcional)",
+    "Prompt do sistema (opcional)",
+    "Системный промпт (необязательно)"
+  ],
+  agentCreate: [
+    "创建 Agent",
+    "建立 Agent",
+    "Create Agent",
+    "Agent を作成",
+    "Agent erstellen",
+    "Créer l’Agent",
+    "Crear Agent",
+    "Criar Agent",
+    "Создать Agent"
+  ],
+  agentCreated: [
+    "已创建：",
+    "已建立：",
+    "Created:",
+    "作成済み：",
+    "Erstellt:",
+    "Créés :",
+    "Creados:",
+    "Criados:",
+    "Созданы:"
+  ],
+  agentSkip: [
+    "跳过此步",
+    "跳過此步",
+    "Skip this step",
+    "このステップをスキップ",
+    "Schritt überspringen",
+    "Passer cette étape",
+    "Saltar este paso",
+    "Pular esta etapa",
+    "Пропустить шаг"
+  ],
+  agentNeedOne: [
+    "至少创建一个 Agent，或跳过此步。",
+    "至少建立一個 Agent，或跳過此步。",
+    "Create at least one Agent, or skip this step.",
+    "Agent を 1 つ以上作成するか、このステップをスキップしてください。",
+    "Mindestens einen Agent erstellen oder diesen Schritt überspringen.",
+    "Créez au moins un Agent ou passez cette étape.",
+    "Crea al menos un Agent o salta este paso.",
+    "Crie pelo menos um Agent ou pule esta etapa.",
+    "Создайте хотя бы один Agent или пропустите шаг."
+  ],
+  doneTitle: [
+    "配置完成",
+    "設定完成",
+    "Setup complete",
+    "設定完了",
+    "Einrichtung abgeschlossen",
+    "Configuration terminée",
+    "Configuración completada",
+    "Configuração concluída",
+    "Настройка завершена"
+  ],
+  doneDesc: [
+    "编程 CLI 已检测，Agent 配置已保存，可以开始使用。",
+    "程式 CLI 已檢測，Agent 設定已儲存，可以開始使用。",
+    "Coding CLIs detected and Agent configuration saved — you are ready to go.",
+    "コーディング CLI の検出と Agent 設定の保存が完了しました。",
+    "Coding-CLIs erkannt und Agent-Konfiguration gespeichert.",
+    "CLI détectées et configuration des Agents enregistrée.",
+    "CLI detectados y configuración de Agents guardada.",
+    "CLIs detectados e configuração dos Agents salva.",
+    "CLI обнаружены, настройки Agent сохранены."
+  ],
+  doneNote: [
+    "可以在工作台侧栏创建第一个项目。",
+    "可以在工作台側欄建立第一個專案。",
+    "Create your first project from the workbench sidebar.",
+    "最初のプロジェクトはワークベンチのサイドバーから作成できます。",
+    "Das erste Projekt lässt sich in der Workbench-Seitenleiste anlegen.",
+    "Créez le premier projet depuis la barre latérale de l’espace de travail.",
+    "Crea el primer proyecto desde la barra lateral del área de trabajo.",
+    "Crie o primeiro projeto pela barra lateral do workbench.",
+    "Первый проект можно создать на боковой панели рабочего места."
+  ],
+  banner: [
+    "初始配置尚未完成：还没有可用的 Agent。",
+    "初始設定尚未完成：還沒有可用的 Agent。",
+    "Initial setup is not finished: no usable Agent yet.",
+    "初期設定が未完了です：使用可能な Agent がまだありません。",
+    "Ersteinrichtung nicht abgeschlossen: noch kein nutzbarer Agent.",
+    "Configuration initiale inachevée : aucun Agent utilisable.",
+    "Configuración inicial sin terminar: aún no hay un Agent utilizable.",
+    "Configuração inicial não concluída: ainda não há Agent utilizável.",
+    "Первоначальная настройка не завершена: рабочего Agent пока нет."
+  ],
+  bannerAction: [
+    "开始配置",
+    "開始設定",
+    "Start setup",
+    "設定を開始",
+    "Einrichtung starten",
+    "Commencer",
+    "Empezar",
+    "Começar",
+    "Начать настройку"
+  ]
+};
+
+export const onboardingTranslations = Object.fromEntries(
+  locales.map((locale, index) => [
+    locale,
+    Object.fromEntries(Object.entries(rows).map(([key, values]) => [key, values[index]]))
+  ])
+) as Record<SupportedLocale, Record<string, string>>;

@@ -1,0 +1,36 @@
+{
+  "name": "teamva",
+  "license": "Apache-2.0",
+  "private": true,
+  "packageManager": "pnpm@11.8.0",
+  "scripts": {
+    "start:browser": "bash scripts/start-browser.sh",
+    "start:lan": "bash scripts/start-lan.sh",
+    "generate:providers": "go run ./node/cmd/provider-gen -root node/provider -out node/provider/catalog/providers_generated.go",
+    "check:providers": "go run ./node/cmd/provider-gen -root node/provider -out node/provider/catalog/providers_generated.go -check",
+    "build": "pnpm generate:providers && pnpm --filter @teamva/web build",
+    "build:website": "pnpm --filter @teamva/website build",
+    "dev:website": "pnpm --filter @teamva/website dev",
+    "dev:web": "pnpm --filter @teamva/web dev",
+    "test": "pnpm test:web",
+    "test:web": "pnpm --filter @teamva/web test",
+    "test:web:watch": "pnpm --filter @teamva/web exec vitest",
+    "test:server": "pnpm generate:providers && (cd server && go test ./...)",
+    "test:node": "pnpm generate:providers && (cd node && go test ./...)",
+    "test:protocol": "(cd protocol && go test ./...)",
+    "test:desktop": "pnpm generate:providers && (cd desktop && go test ./...)",
+    "test:backend": "pnpm test:server && pnpm test:node && pnpm test:protocol && pnpm test:desktop",
+    "test:all": "pnpm test:backend && pnpm test:web",
+    "test:browser": "playwright test",
+    "test:browser:smoke": "playwright test --grep @smoke",
+    "test:browser:layout": "playwright test --grep @layout",
+    "test:runtime:streaming": "pnpm generate:providers && node scripts/e2e/local-streaming-smoke.mjs",
+    "verify:backend": "pnpm generate:providers && (cd server && go test -race ./... && go vet ./...) && (cd node && go test -race ./... && go vet ./...) && (cd protocol && go test ./...) && (cd desktop && go test -race ./... && go vet ./...)",
+    "verify:web": "pnpm --filter @teamva/web check && pnpm --filter @teamva/web test && pnpm --filter @teamva/web build",
+    "verify": "pnpm verify:backend && pnpm verify:web",
+    "typecheck": "pnpm --filter @teamva/web typecheck"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  }
+}

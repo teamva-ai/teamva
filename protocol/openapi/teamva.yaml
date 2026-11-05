@@ -1,0 +1,4506 @@
+openapi: 3.1.0
+info:
+  title: Teamva Local API
+  version: 0.3.0-mvp
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+  description: |
+    Teamva 浏览器控制面契约。所有时间均为 UTC RFC 3339；所有成功响应
+    包含 `data` 与 `meta`，失败响应包含稳定错误码和 `request_id`。
+    所有面向客户端的 error.message 至少包含英文；现有中文业务说明以
+    `English / 中文` 双语形式返回，客户端不得解析 message 做程序判断。
+    浏览器和 Wails 共用本机 loopback HTTP 服务。接口仅使用 HttpOnly 会话 Cookie，并在写请求携带 X-CSRF-Token；
+    会话不设绝对有效期，连续 30 天无认证活动后失效，有效请求会滑动续期；
+    首次访问通过严格同源 JSON POST 建立本地会话。不提供账号登录、设备绑定或远端 Node 通道。
+servers:
+  - url: /v1
+security:
+  - cookieSession: []
+tags:
+  - {name: System, description: 健康与版本}
+  - {name: Identity, description: 用户会话}
+  - {name: Computers, description: 本机设备和 Agent Service}
+  - {name: Projects, description: 项目与资源}
+  - {name: Agents, description: 本机 Agent 配置与 Skills 商店}
+  - name: MCP
+    description: |
+      仅本机已认证用户管理的私有 MCP 配置、连接与授权；真实 socket 必须来自 loopback，
+      远程入口和伪造 Host/代理头不能越权。写操作要求严格同源与 CSRF。
+      稳定错误映射：不存在为 not_found/404，版本冲突为 version_conflict/409，
+      配置或目标无效为 mcp_invalid/400，其余管理器错误为 mcp_unavailable/503；
+      认证失败 401，本机权限失败 403，未提供管理能力 501。原始错误内容不反射。
+  - {name: Issues, description: 任务（Issue）、评论与 Agent 实例执行}
+  - {name: Conversations, description: 独立图对话、分叉与消息执行}
+  - {name: Memory, description: 可版本化项目记忆}
+  - {name: Automation, description: 计划任务}
+  - {name: Approval, description: 审批与策略}
+  - {name: Audit, description: 审计查询}
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: 获取控制面健康状态
+      tags: [System]
+      security: []
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+  /desktop/bootstrap:
+    servers: [{url: /}]
+    get:
+      operationId: desktopBootstrap
+      summary: Wails 内部用一次性 nonce 建立本地会话
+      description: nonce 30 秒有效、只能使用一次，不写入日志或运行状态文件。普通浏览器使用 auth/local-session，不需要 nonce。
+      tags: [Identity]
+      security: []
+      parameters:
+        - {name: nonce, in: query, required: true, schema: {type: string}}
+      responses:
+        "303": {description: 会话已建立，导航到工作台}
+        "404": {description: nonce 缺失、失效或已消费}
+  /auth/local-session:
+    post:
+      operationId: bootstrapLocalSession
+      summary: 建立或恢复本机浏览器会话
+      description: |
+        必须是同源 application/json POST；Origin 必须精确等于本地服务 origin，
+        Sec-Fetch-Site（存在时）必须为 same-origin。已有有效 Cookie 时恢复相同会话，
+        否则为本机用户建立会话。返回 user 和 csrf_token，不返回 Cookie 令牌。
+      tags: [Identity]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "403": {$ref: "#/components/responses/Error"}
+  /auth/csrf:
+    get:
+      operationId: getCSRFToken
+      summary: 恢复当前浏览器会话的 CSRF Token
+      description: Token 由当前 Session 与服务端密钥派生，不以明文存入数据库；前端仅保存在内存。
+      tags: [Identity]
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "401": {$ref: "#/components/responses/Error"}
+  /auth/bootstrap:
+    get:
+      operationId: getAuthBootstrap
+      summary: 一次恢复当前用户与 CSRF Token
+      description: 读取已有 Cookie 会话的用户和 CSRF，不签发新会话。
+      tags: [Identity]
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "401": {$ref: "#/components/responses/Error"}
+  /me:
+    get:
+      operationId: getCurrentUser
+      summary: 获取当前用户
+      tags: [Identity]
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "401": {$ref: "#/components/responses/Error"}
+  /system/capabilities:
+    get:
+      operationId: getRuntimeCapabilities
+      summary: 获取当前运行模式与产品能力
+      description: 本机 SQLite、嵌入式 Runtime 和文件系统能力；不存在远端模式或构建时业务分支。
+      tags: [Identity]
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "401": {$ref: "#/components/responses/Error"}
+  /auth/remote-session:
+    get:
+      operationId: getRemoteSession
+      summary: 检查远程登录会话
+      description: 仅局域网监听提供。要求 HttpOnly Cookie。普通登录 12 小时有效且重启/停用后失效；已信任设备无服务端到期时间，仅实际改密码撤销信任。重启、关闭再开启及同 IP 换端口保留信任；普通会话不能跨端口，可信凭据必须由同一服务摘要表识别且绑定同一 IP。可信 Cookie 在访问时按浏览器 400 天存储上限续期，并非信任 TTL。失败返回 JSON，不重定向 API 或触发浏览器 Basic 弹窗。
+      tags: [Identity]
+      security: []
+      responses:
+        "204": {description: 远程会话有效}
+        "401": {$ref: "#/components/responses/Error"}
+    post:
+      operationId: createRemoteSession
+      summary: 通过密码登录远程工作台
+      description: 仅局域网监听提供。由 /remote/login 页面发送严格同源 JSON，接收 password 和可选 trust_device，无用户名，不使用 Basic。要求 Origin 与当前 HTTP origin 完全一致，拒绝 cross-site Fetch Metadata 和未知 JSON 字段。成功设置 host-only、HttpOnly、SameSite=Strict 的 am_remote_<端口> Cookie，响应不返回令牌。默认 12 小时，仅内存保存普通会话摘要；trust_device=true 时永久保存随机凭据摘要与 Host，无到期时间，仅实际修改密码撤销信任。可信 Cookie 每次访问续期，受浏览器 400 天存储上限限制。重启、停用再开启及同 IP 换端口不撤销信任。不保存密码或原始 Cookie，不进入诊断或 Provider 环境。持久化失败不签发新 Cookie。已有可信凭据重新登录时轮换，但不因本次未勾选而取消先前信任。会话容量有上限，登录限流。前端登录成功后跳回校验过的站内原页面，再调用 local-session。仅用于可信 LAN/VPN。
+      tags: [Identity]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [password]
+              properties:
+                password: {type: string, format: password, writeOnly: true, maxLength: 72}
+                trust_device: {type: boolean, default: false, description: 仅在私人设备上显式勾选；服务端不设置到期时间，只有实际修改访问密码才撤销信任，浏览器 Cookie 在访问时续期}
+      responses:
+        "204": {description: 已设置远程登录 Cookie；前端在站内跳转}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "415": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
+  /inspirations:
+    get:
+      operationId: listInspirations
+      summary: 按项目分组读取全局灵感便签摘要
+      description: 所有权属于当前用户而非项目；project_id 仅分组，空值表示未分组。摘要只含短 Markdown 预览，正文通过详情按需读取。按 created_at/id 倒序，修改与完成不改变便签顺序。
+      tags: [Identity]
+      parameters:
+        - {name: project_id, in: query, schema: {type: string}, description: 省略为全部，空字符串为未分组}
+        - {name: search, in: query, schema: {type: string, maxLength: 500}}
+        - {name: status, in: query, schema: {type: string, enum: [all, open, completed], default: all}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 0, maximum: 100, default: 40}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 1000000}}
+      responses:
+        '200': {$ref: '#/components/responses/Success'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: createInspiration
+      summary: 创建以 Markdown 为唯一正文的全局便签
+      tags: [Identity]
+      parameters:
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, maxLength: 128}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                project_id: {type: string, description: 可省略或为空；只能关联当前用户的有效项目}
+                title: {type: string, maxLength: 200}
+                markdown: {type: string, description: 原始 Markdown 文本，最多 262144 UTF-8 字节；拒绝编辑器 JSON 对象}
+      responses:
+        '201': {$ref: '#/components/responses/Success'}
+        '400': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /inspirations/groups:
+    get:
+      operationId: inspirationGroups
+      summary: 灵感的项目区域与数量
+      description: 包含未分组、有效项目及仍有关联便签的已删除项目。删除项目不删除全局灵感，已删除分组内的便签仍可编辑和重新归组。
+      tags: [Identity]
+      parameters:
+        - {name: search, in: query, schema: {type: string, maxLength: 500}}
+        - {name: status, in: query, schema: {type: string, enum: [all, open, completed]}}
+      responses:
+        '200': {$ref: '#/components/responses/Success'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+  /inspirations/{inspiration_id}:
+    parameters:
+      - {name: inspiration_id, in: path, required: true, schema: {type: string}}
+    get:
+      operationId: getInspiration
+      summary: 读取灵感 Markdown 正文及元数据
+      tags: [Identity]
+      responses:
+        '200':
+          description: 灵感详情
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: '#/components/schemas/Inspiration'}
+        '404': {$ref: '#/components/responses/Error'}
+    patch:
+      operationId: updateInspiration
+      summary: 保存 Markdown、修改项目分组或完成状态
+      description: 必须携带 expected_version。仅修改传入字段，版本冲突不覆盖当前保存内容。完成记录时间，恢复未完成清除完成时间。变更与无正文的工作记录同事务提交。
+      tags: [Identity]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_version]
+              properties:
+                expected_version: {type: integer, minimum: 1}
+                project_id: {type: string}
+                title: {type: string, minLength: 1, maxLength: 200}
+                markdown: {type: string, description: 最多 262144 UTF-8 字节，纯 Markdown}
+                completed: {type: boolean}
+      responses:
+        '200': {$ref: '#/components/responses/Success'}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteInspiration
+      summary: 删除当前用户的灵感
+      tags: [Identity]
+      parameters:
+        - {name: expected_version, in: query, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '204': {description: 已删除，不影响项目和助手聊天}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /inspirations/{inspiration_id}/markdown:
+    get:
+      operationId: downloadInspirationMarkdown
+      summary: 导出原始 Markdown，不导出编辑器结构
+      tags: [Identity]
+      parameters:
+        - {name: inspiration_id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Markdown 附件
+          content:
+            text/markdown:
+              schema: {type: string}
+        '404': {$ref: '#/components/responses/Error'}
+  /work-records/query:
+    post:
+      operationId: queryWorkRecords
+      summary: 查询全局工作记录
+      description: 默认查询用户提交的操作和有效导航。底层变更由业务事务同步记录，可选择包含或在详情展开。所有查询限制为当前用户，支持参数化组合条件，深度最多 5、条件节点最多 60。按 occurred_at 与 id 倒序，limit 默认 50、最多 200。
+      tags: [Identity]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/WorkQuery'}
+      responses:
+        '200':
+          description: 查询结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    required: [items, total]
+                    properties:
+                      items: {type: array, items: {$ref: '#/components/schemas/WorkRecord'}}
+                      total: {type: integer}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+  /work-records/{record_id}:
+    get:
+      operationId: getWorkRecord
+      summary: 工作记录详情、后续动作和关联链接
+      tags: [Identity]
+      parameters:
+        - {name: record_id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {$ref: '#/components/responses/Success'}
+        '404': {$ref: '#/components/responses/Error'}
+  /work-records/navigation:
+    post:
+      operationId: recordWorkNavigation
+      summary: 幂等记录客户端观察到的有效对象切换
+      description: 只接收项目/任务/图/节点 ID，不接收任意正文或认证标识。用户归属和导航类型由服务端指定，目标必须可访问。X-Work-Client 和 X-Work-Page 为非认证随机客户端标识；不信任它们作为用户身份或业务操作证明。
+      tags: [Identity]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [id, sequence, occurred_at, from, to]
+              properties:
+                id: {type: string, maxLength: 100}
+                sequence: {type: integer, minimum: 1}
+                occurred_at: {type: string, format: date-time}
+                from: {$ref: '#/components/schemas/WorkLocation'}
+                to: {$ref: '#/components/schemas/WorkLocation'}
+      responses:
+        '204': {description: 已记录、已存在或没有有效切换}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+  /work-records/clear:
+    post:
+      operationId: clearWorkRecords
+      summary: 确认后清除匹配的工作记录
+      description: 必须显式 confirm=true，并提供 query.until 截止时间。不会删除原业务对象或助手聊天；清除动作进入日志。此接口不提供给只读助手。
+      tags: [Identity]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [query, confirm]
+              properties:
+                query: {$ref: '#/components/schemas/WorkQuery'}
+                confirm: {type: boolean, const: true}
+      responses:
+        '200': {$ref: '#/components/responses/Success'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+  /work-record-filters:
+    get:
+      operationId: listWorkFilters
+      summary: 列出当前用户保存的筛选
+      tags: [Identity]
+      responses:
+        '200': {$ref: '#/components/responses/Success'}
+        '401': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: saveWorkFilter
+      summary: 命名保存或更新组合筛选
+      tags: [Identity]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, query]
+              properties:
+                id: {type: string}
+                name: {type: string, minLength: 1, maxLength: 100}
+                query: {$ref: '#/components/schemas/WorkQuery'}
+      responses:
+        '200': {$ref: '#/components/responses/Success'}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /work-record-filters/{filter_id}:
+    delete:
+      operationId: deleteWorkFilter
+      summary: 删除自己的保存筛选
+      tags: [Identity]
+      parameters:
+        - {name: filter_id, in: path, required: true, schema: {type: string}}
+      responses:
+        '204': {description: 已删除}
+        '401': {$ref: '#/components/responses/Error'}
+  /work-assistant:
+    get:
+      operationId: getWorkAssistant
+      summary: 获取系统 Agent Lumi，包括待配置状态
+      description: 仅返回内置 Agent 身份；Lumi 与其他 Agent 均通过 PATCH /agents/{agent_id} 保存配置，不提供独立配置入口。Lumi 只受不可删除保护，可像普通 Agent 一样配置、参与 Issue 和定时任务。默认备注为“内置 Agent，不能被删除；可像普通 Agent 一样配置并参与任务。”；初始化只填充空白或旧版生成备注，保留已有自定义备注与配置。
+      tags: [Identity]
+      responses:
+        '200': {$ref: '#/components/responses/Success'}
+        '401': {$ref: '#/components/responses/Error'}
+  /work-assistant/sessions:
+    get:
+      operationId: listAssistantSessions
+      summary: 获取全局助手会话列表
+      parameters:
+        - {name: scope, in: query, schema: {type: string, enum: [work_history, inspirations], default: work_history}}
+      tags: [Identity]
+      responses:
+        '200': {$ref: '#/components/responses/Success'}
+        '401': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: createAssistantSession
+      summary: 创建不属于业务项目的助手会话
+      tags: [Identity]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                title: {type: string, maxLength: 200}
+                scope: {type: string, enum: [work_history, inspirations], default: work_history}
+      responses:
+        '201': {$ref: '#/components/responses/Success'}
+        '400': {$ref: '#/components/responses/Error'}
+  /work-assistant/sessions/{session_id}/messages:
+    parameters:
+      - {name: session_id, in: path, required: true, schema: {type: string}}
+    get:
+      operationId: listAssistantMessages
+      summary: 读取助手会话历史和执行状态
+      tags: [Identity]
+      responses:
+        '200': {$ref: '#/components/responses/Success'}
+        '404': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: sendAssistantMessage
+      summary: 持久化问题并调度只读助手 Run
+      description: 同一会话内串行，支持幂等重试；每轮冻结当前筛选和选中 ID。复用持久化 Run、outbox、流事件和恢复，不伪造项目。Run 的 project_id 为空，assistant_session_id 非空，purpose=work_assistant，read_only=true。只读工具由服务端按持久化 Run 归属授权，禁止业务写入和 Computer Use；原历史按需读取，不复制进工作记录。
+      tags: [Identity]
+      parameters:
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, maxLength: 128}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [body]
+              properties:
+                body: {type: string, minLength: 1, maxLength: 40000}
+                query: {$ref: '#/components/schemas/WorkQuery'}
+                selected_ids: {type: array, maxItems: 100, items: {type: string}}
+                inspiration_ids: {type: array, maxItems: 100, items: {type: string}, description: 仅灵感范围会话接受；指向当前用户已保存的便签，不发送编辑器 JSON 或整篇正文}
+                inspiration_query: {$ref: '#/components/schemas/InspirationQuery'}
+      responses:
+        '202': {$ref: '#/components/responses/Success'}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /system/network-access:
+    get:
+      operationId: getNetworkAccess
+      summary: 读取远程访问状态
+      description: 返回局域网监听状态、IP 地址、本机与局域网共用的服务端口和是否设置密码；不返回密码或哈希。端口为只读，由服务启动时选择。远程会话可读取，但 can_manage 为 false。响应不缓存。
+      tags: [Identity]
+      responses:
+        "200":
+          description: 当前远程访问状态
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {$ref: "#/components/schemas/NetworkAccess"}
+        "401": {$ref: "#/components/responses/Error"}
+    put:
+      operationId: updateNetworkAccess
+      summary: 开关局域网访问并设置密码
+      description: 仅本机入口的已认证会话可修改，要求 CSRF 和严格同源。本机访问免访问密码，开启后在局域网 IPv4 地址上使用相同服务端口，不再接受 port 字段。首次开启必须提供密码；密码为空或省略时保留原密码，重复保存相同密码不撤销信任。至少 8 个字符、最多 72 个 UTF-8 字节，不含控制字符。只持久化 bcrypt 哈希。保存立即生效且重启后保留；关闭访问断开连接并清理普通会话，但保留设备信任；实际改密码才原子撤销所有远程会话和设备信任。局域网绑定或保存失败不修改当前设置。本机 loopback 入口始终不变。远程通过工作台自有页面仅输入密码登录，无用户名；仅适用于可信 LAN/VPN。
+      tags: [Identity]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UpdateNetworkAccessRequest"}
+      responses:
+        "200":
+          description: 已持久化并应用的远程访问状态
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {$ref: "#/components/schemas/NetworkAccess"}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /system/programming-tools:
+    get:
+      operationId: listProgrammingToolExecutables
+      summary: 列出编程工具当前使用的可执行文件
+      description: 返回每个 Provider 保存的自定义路径（空表示自动解析）与运行时实际使用的可执行文件及来源（custom/environment/bundled/path）。响应不缓存。
+      tags: [Identity]
+      responses:
+        "200":
+          description: 各 Provider 的可执行文件解析
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items: {$ref: "#/components/schemas/ProgrammingToolExecutable"}
+        "401": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+  /system/programming-tools/{provider}:
+    parameters:
+      - {name: provider, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9_-]{0,63}$'}}
+    put:
+      operationId: updateProgrammingToolExecutable
+      summary: 设置或清除编程工具的外部可执行文件路径
+      description: 仅本机入口的已认证会话可修改，要求 CSRF 和严格同源。必须显式提供 path 字符串，空字符串表示恢复自动解析；非空必须是可执行文件的绝对路径（支持 `~/` 前缀），保存前校验文件存在且可执行。保存立即生效：替换诊断客户端并回收空闲实例，不打断进行中的 Run；重启后保留。不校验该文件自身的版本或输出，诊断页会给出真实结果。设置读写串行化；SQLite 保存失败会恢复原持久化路径，补偿也失败时返回 503 programming_tool_update_incomplete，details 标记 durable_setting_retained=true、runtime_state=unknown、retry_action=save，不宣称两侧已同步且不反射上游错误或秘密。
+      tags: [Identity]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [path]
+              properties:
+                path: {type: string, maxLength: 4096, description: 可执行文件绝对路径；空字符串恢复默认解析}
+      responses:
+        "200":
+          description: 已保存并生效的解析结果
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {$ref: "#/components/schemas/ProgrammingToolExecutable"}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+        "500": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /system/programming-tools/{provider}/model-providers:
+    parameters:
+      - {name: provider, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9_-]{0,63}$'}}
+    get:
+      operationId: getModelProviderSettings
+      summary: 读取大模型供应商预设及已配置状态
+      description: 仅本机已认证会话。由 Coding Agent 接入声明支持（当前 OpenCode）；返回常见供应商、API 地址、可编辑的示例模型和 key_configured，不返回密钥，不缓存。
+      tags: [Identity]
+      responses:
+        "200":
+          description: 模型 API 配置视图
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    required: [presets, configured]
+                    properties:
+                      presets:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id: {type: string}
+                            name: {type: string}
+                            base_url: {type: string}
+                            protocol: {type: string, enum: [openai, anthropic, google]}
+                            models: {type: array, items: {type: string}}
+                      configured: {type: array, items: {$ref: "#/components/schemas/ModelProviderView"}}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+    put:
+      operationId: saveModelProvider
+      summary: 在本机私有配置中保存大模型 API
+      description: 要求本机入口、登录、CSRF 和同源。密钥写入 Provider 私有 0600 文件，不进入 app.db、Runtime inbox、审计正文或诊断。空密钥仅在供应商与完整 Base URL 相同时保留旧值。URL 改变需重新输入密钥。不覆盖已有 OpenCode 配置。保存后刷新真实模型目录，不发送测试消息，也不自动承诺 API 可用。
+      tags: [Identity]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ModelProviderInput"}
+      responses:
+        "200":
+          description: 已保存的非秘密视图
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: "#/components/schemas/ModelProviderView"}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /system/programming-tools/{provider}/model-providers/test:
+    parameters:
+      - {name: provider, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9_-]{0,63}$'}}
+    post:
+      operationId: testModelProvider
+      summary: 显式发送一次 Hello 测试大模型 API
+      description: 仅本机已认证同源 CSRF 请求。只发送固定 Hello，不接受任意提示词、不保存草稿、不自动重试、不跟随重定向。最长 25 秒、响应读取最多 64 KiB；成功要求实际模型回复，200 错误正文或 HTML 不算成功。结果不包含模型原文、认证头或上游错误。可能产生少量供应商费用。
+      tags: [Identity]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ModelProviderInput"}
+      responses:
+        "200":
+          description: 测试已完成，ok 为 false 表示连接或模型验证失败
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    required: [ok, code, duration_ms]
+                    properties:
+                      ok: {type: boolean}
+                      code: {type: string, enum: [success, authentication_failed, rate_limited, request_failed, unreachable, timeout, invalid_response]}
+                      duration_ms: {type: integer, minimum: 0}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /mcp/servers:
+    get:
+      operationId: listMCPServers
+      summary: 列出本机 MCP 服务及其连接状态
+      description: |
+        仅真实 loopback socket 上的当前本机用户会话可访问；局域网会话即使已认证、
+        Host 或代理头伪装为 localhost 也不可访问。省略 project_id 时只列用户级配置；
+        提供时先校验项目存在且属于当前用户，再列用户级和该项目级配置，保留各自 scope。
+        返回脱敏 View，不启动进程、不连接服务器、不执行模型。
+        所有 environment/headers 值和 oauth.client_secret 均替换为
+        __TEAMVA_KEEP_SECRET__，不返回原始认证凭据或上游错误正文。
+      tags: [MCP]
+      parameters:
+        - {$ref: "#/components/parameters/MCPProjectQuery"}
+      responses:
+        "200": {$ref: "#/components/responses/MCPServerList"}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+    post:
+      operationId: saveMCPServer
+      summary: 创建或按乐观版本更新本机 MCP 配置
+      description: |
+        仅本机用户的已认证 loopback 请求，要求严格同源与 CSRF。version=0 创建；
+        version>0 仅更新匹配 name/scope/project_id 且版本相同的条目，重复创建或旧版本返回 409。
+        user 作用域禁止 project_id，project 作用域必须提供当前用户拥有的真实项目。
+        config 是完整 OpenCode V2 MCP entry，不是 mcpServers 包装或 Provider 配置文件。
+        保存仅写本机私有 0600 配置文件，不启动进程、不自动连接或执行模型。
+        编辑时允许用 __TEAMVA_KEEP_SECRET__ 保留相同条目、相同字段的旧秘密；
+        新建条目或字段没有旧值时禁止使用哨兵。所有 environment/headers 值及
+        oauth.client_secret 响应只返回该哨兵，完整秘密不得进入 app.db、Runtime 命令/结果、
+        事件、日志、审计或诊断。可写 Issue Run 按 Agent 配置使用自定义 MCP；工作记录、灵感等只读会话不注入自定义 MCP。
+      tags: [MCP]
+      parameters:
+        - {$ref: "#/components/parameters/MCPCSRFToken"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/MCPServerInput"}
+      responses:
+        "200": {$ref: "#/components/responses/MCPServer"}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /mcp/servers/{name}:
+    parameters:
+      - {$ref: "#/components/parameters/MCPServerName"}
+    delete:
+      operationId: deleteMCPServer
+      summary: 删除指定作用域与版本的 MCP 配置
+      description: |
+        仅本机用户已认证、同源 CSRF 请求；以 scope/project_id/name 精确定位，不回退其他作用域。
+        project 作用域必须属于当前用户；user 禁止 project_id。version 必须为正整数并与当前版本匹配。
+        删除停止该连接并移除其私有配置/授权，不执行模型；不把配置或秘密写入持久命令或审计。
+      tags: [MCP]
+      parameters:
+        - {$ref: "#/components/parameters/MCPCSRFToken"}
+        - {$ref: "#/components/parameters/MCPScopeQuery"}
+        - {$ref: "#/components/parameters/MCPProjectQuery"}
+        - {name: version, in: query, required: true, schema: {type: integer, format: int64, minimum: 1}, description: 当前条目的乐观版本，不使用 expected_version}
+      responses:
+        "200": {$ref: "#/components/responses/MCPDeleted"}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /mcp/servers/{name}/connect:
+    parameters:
+      - {$ref: "#/components/parameters/MCPServerName"}
+    post:
+      operationId: connectMCPServer
+      summary: 显式连接 MCP 并读取能力目录
+      description: |
+        仅本机用户已认证、严格同源 CSRF 请求，按目标作用域校验项目所有权。
+        这是显式启动 local argv 进程或 remote 连接的入口；只做协议握手和 tools/resources/prompts
+        目录读取，不调用模型、不隐式调用 MCP 工具，不扩大只读会话权限。
+        状态和目录通过脱敏 View 返回，原始上游错误不反射到响应。
+      tags: [MCP]
+      parameters:
+        - {$ref: "#/components/parameters/MCPCSRFToken"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/MCPTarget"}
+      responses:
+        "200": {$ref: "#/components/responses/MCPServer"}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /mcp/servers/{name}/disconnect:
+    parameters:
+      - {$ref: "#/components/parameters/MCPServerName"}
+    post:
+      operationId: disconnectMCPServer
+      summary: 显式断开 MCP 连接
+      description: 仅本机用户已认证、严格同源 CSRF 请求，校验作用域/项目所有权。停止该条目的进程或连接并清空运行期目录，不删除私有配置，不执行模型。
+      tags: [MCP]
+      parameters:
+        - {$ref: "#/components/parameters/MCPCSRFToken"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/MCPTarget"}
+      responses:
+        "200": {$ref: "#/components/responses/MCPServer"}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /mcp/servers/{name}/auth:
+    parameters:
+      - {$ref: "#/components/parameters/MCPServerName"}
+    post:
+      operationId: authMCPServer
+      summary: 为指定 MCP 发起显式 OAuth 授权
+      description: |
+        仅本机用户已认证、严格同源 CSRF 请求，校验作用域/项目所有权。返回可在浏览器打开的授权 URL
+        和状态，不返回 token/client_secret，不执行模型。OAuth 凭据只保存在本机私有 0600 文件；
+        不进入数据库、Runtime 命令、日志、审计或诊断。oauth=false 或不支持授权的配置返回稳定错误。
+      tags: [MCP]
+      parameters:
+        - {$ref: "#/components/parameters/MCPCSRFToken"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/MCPTarget"}
+      responses:
+        "200": {$ref: "#/components/responses/MCPAuth"}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /mcp/servers/{name}/revoke:
+    parameters:
+      - {$ref: "#/components/parameters/MCPServerName"}
+    post:
+      operationId: revokeMCPServer
+      summary: 撤销本机保存的 MCP 授权
+      description: 仅本机用户已认证、严格同源 CSRF 请求，校验作用域/项目所有权。清理该目标的私有授权与连接，不删除配置、不执行模型；返回脱敏 View，不返回旧凭据。
+      tags: [MCP]
+      parameters:
+        - {$ref: "#/components/parameters/MCPCSRFToken"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/MCPTarget"}
+      responses:
+        "200": {$ref: "#/components/responses/MCPServer"}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /system/onboarding:
+    get:
+      operationId: getOnboarding
+      summary: 读取首次配置引导状态
+      description: needed 由当前用户的 Agent 状态推导（没有用户创建的 Agent 且 Lumi 未配置时为 true），不持久化；dismissed 在跳过或完成引导时持久化，只有设置里手动重新运行才会再次打开。响应不缓存。
+      tags: [Identity]
+      responses:
+        "200":
+          description: 当前引导状态
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {$ref: "#/components/schemas/Onboarding"}
+        "401": {$ref: "#/components/responses/Error"}
+    put:
+      operationId: updateOnboarding
+      summary: 记录跳过或完成引导
+      description: 仅接受 dismissed 字段。true 表示跳过或完成引导，不再自动弹出；false 可重新打开自动弹出（设置中的手动重开只做页面跳转，不需要此调用）。不影响 Agent、项目或任何业务数据。
+      tags: [Identity]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [dismissed]
+              properties:
+                dismissed: {type: boolean}
+      responses:
+        "200":
+          description: 更新后的引导状态
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {$ref: "#/components/schemas/Onboarding"}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+  /me/feature-tours:
+    get:
+      operationId: getCurrentUserFeatureTours
+      summary: 获取当前用户已显示过的栏目教学
+      description: 全局于当前已认证用户，与项目、设备、首次配置引导和用户设置版本无关。新用户返回 seen 空数组；只读且不回填元数据，响应不缓存。
+      tags: [Identity]
+      responses:
+        "200": {$ref: "#/components/responses/FeatureTours"}
+        "401": {$ref: "#/components/responses/Error"}
+        "500": {$ref: "#/components/responses/Error"}
+  /me/feature-tours/{tour_id}/seen:
+    post:
+      operationId: markCurrentUserFeatureTourSeen
+      summary: 原子记录当前用户已看到一个栏目教学
+      description: 弹窗真正显示后调用，不表示用户完成或关闭教学。仅增加已看集合，重复调用幂等；并发标记不同栏目不会丢失。不修改用户设置版本或首次配置引导，不提供重置接口。沿用 Cookie 认证、同源检查和 X-CSRF-Token；无效 ID 返回 400，损坏元数据报错并保留原值。
+      tags: [Identity]
+      parameters:
+        - name: tour_id
+          in: path
+          required: true
+          schema: {$ref: "#/components/schemas/FeatureTourID"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              maxProperties: 0
+      responses:
+        "200": {$ref: "#/components/responses/FeatureTours"}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "500": {$ref: "#/components/responses/Error"}
+  /me/preferences:
+    get:
+      operationId: getCurrentUserPreferences
+      summary: 获取服务端保存的当前用户界面设置
+      description: 登录后的服务端值是权威值；浏览器本地值只用于登录前语言检测和启动缓存。
+      tags: [Identity]
+      responses:
+        "200": {$ref: "#/components/responses/UserPreferences"}
+        "401": {$ref: "#/components/responses/Error"}
+    patch:
+      operationId: updateCurrentUserPreferences
+      summary: 按版本更新当前用户界面设置
+      tags: [Identity]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UpdateUserPreferencesRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/UserPreferences"}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /computers:
+    get:
+      operationId: listComputers
+      summary: 列出当前用户设备
+      tags: [Computers]
+      responses:
+        "200": {$ref: "#/components/responses/Page"}
+        "401": {$ref: "#/components/responses/Error"}
+  /computers/{computer_id}:
+    parameters:
+      - {$ref: "#/components/parameters/ComputerID"}
+    get:
+      operationId: getComputer
+      summary: 获取设备状态
+      tags: [Computers]
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "404": {$ref: "#/components/responses/Error"}
+  /computers/{computer_id}/agent-services:
+    parameters:
+      - {$ref: "#/components/parameters/ComputerID"}
+    get:
+      operationId: listAgentServices
+      summary: 列出设备已探测的 Agent Service
+      tags: [Computers]
+      responses:
+        "200": {$ref: "#/components/responses/Page"}
+        "404": {$ref: "#/components/responses/Error"}
+  /computers/{computer_id}/resource-openers:
+    parameters:
+      - {$ref: "#/components/parameters/ComputerID"}
+    get:
+      operationId: listResourceOpeners
+      summary: 探测本机可用于打开代码目录的文件管理器、终端和 IDE
+      tags: [Computers]
+      responses:
+        "200":
+          description: 当前操作系统和打开器可用状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: "#/components/schemas/SuccessEnvelope"}
+                  - type: object
+                    properties:
+                      data: {$ref: "#/components/schemas/ResourceOpeners"}
+        "404": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+  /computers/{computer_id}/directory-list:
+    parameters:
+      - {$ref: "#/components/parameters/ComputerID"}
+    post:
+      operationId: listDirectory
+      summary: 请求设备列出本地目录（供文件选择器使用）
+      tags: [Computers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                path: {type: string, description: 起始目录，空为家目录}
+                query: {type: string, description: 按名称前缀过滤}
+                show_hidden: {type: boolean, default: false, description: 是否包含隐藏目录；沿用同一持久化目录列举命令}
+      responses:
+        "202":
+          description: 命令已入队
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      command_id: {type: string}
+        "404": {$ref: "#/components/responses/Error"}
+  /computers/{computer_id}/directory-list/{command_id}:
+    parameters:
+      - {$ref: "#/components/parameters/ComputerID"}
+      - {name: command_id, in: path, required: true, schema: {type: string}}
+    get:
+      operationId: listDirectoryResult
+      summary: 轮询目录列表命令结果
+      tags: [Computers]
+      responses:
+        "200":
+          description: 命令状态与结果
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      status: {type: string}
+                      result:
+                        type: object
+                        additionalProperties: false
+                        properties:
+                          path: {type: string}
+                          home: {type: string}
+                          items:
+                            type: array
+                            items:
+                              type: object
+                              additionalProperties: false
+                              properties:
+                                name: {type: string}
+                                path: {type: string}
+                                is_dir: {type: boolean}
+        "404": {$ref: "#/components/responses/Error"}
+  /computers/{computer_id}/resource-register:
+    parameters:
+      - {$ref: "#/components/parameters/ComputerID"}
+    post:
+      operationId: registerResource
+      summary: 请求设备校验本地目录并返回绝对路径
+      tags: [Computers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [path]
+              properties:
+                path: {type: string}
+      responses:
+        "202":
+          description: 命令已入队
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      command_id: {type: string}
+        "404": {$ref: "#/components/responses/Error"}
+  /agent-services/{service_id}/probe:
+    parameters:
+      - {$ref: "#/components/parameters/ServiceID"}
+    post:
+      operationId: probeAgentService
+      summary: 请求 Node 重新探测 Agent
+      tags: [Computers]
+      responses:
+        "202": {$ref: "#/components/responses/Success"}
+        "409": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /computers/{computer_id}/programming-tools/{provider}/diagnose:
+    parameters:
+      - {$ref: "#/components/parameters/ComputerID"}
+      - {name: provider, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9_-]{0,63}$'}}
+    post:
+      operationId: diagnoseProgrammingTool
+      summary: 在本机运行编程工具诊断并返回逐步日志
+      tags: [Computers]
+      responses:
+        "200":
+          description: 诊断完成
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: "#/components/schemas/SuccessEnvelope"}
+                  - type: object
+                    properties:
+                      data: {$ref: "#/components/schemas/ProviderDiagnostic"}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+  /computers/{computer_id}/programming-tools/{provider}/recycle-idle:
+    parameters:
+      - {$ref: "#/components/parameters/ComputerID"}
+      - {name: provider, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9_-]{0,63}$'}}
+    post:
+      operationId: recycleIdleProgrammingTool
+      summary: 同步回收指定编程工具的空闲本机 Runtime
+      description: 不会中断活动 Run；若仍有活动实例，调用方可在 Run 终态后重试。
+      tags: [Computers]
+      responses:
+        "200":
+          description: 回收尝试完成
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: "#/components/schemas/SuccessEnvelope"}
+                  - type: object
+                    properties:
+                      data: {$ref: "#/components/schemas/ProviderRuntimeRecycleResult"}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+  /projects:
+    get:
+      operationId: listProjects
+      summary: 按计算机列出项目
+      description: 内置默认项目优先返回，其余项目保持创建时间及 ID 顺序。
+      tags: [Projects]
+      parameters:
+        - {name: computer_id, in: query, required: true, schema: {type: string}}
+      responses:
+        "200": {$ref: "#/components/responses/ProjectPage"}
+        "401": {$ref: "#/components/responses/Error"}
+    post:
+      operationId: createProject
+      summary: 创建项目
+      tags: [Projects]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateProjectRequest"}
+      responses:
+        "201": {$ref: "#/components/responses/Project"}
+        "400": {$ref: "#/components/responses/Error"}
+  /projects/{project_id}:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectID"}
+    get:
+      operationId: getProject
+      summary: 获取项目
+      tags: [Projects]
+      responses:
+        "200": {$ref: "#/components/responses/Project"}
+        "404": {$ref: "#/components/responses/Error"}
+    patch:
+      operationId: updateProject
+      summary: 按版本更新项目
+      description: 内置默认项目的名称固定为“默认项目”；修改名称返回 403 protected_project，description 可正常更新。先校验所有权，非所有者返回 404。项目不提供独立配色。
+      tags: [Projects]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UpdateProjectRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/Project"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+    delete:
+      operationId: deleteProject
+      summary: 软删除空闲项目
+      description: 内置默认项目不可删除，返回 403 protected_project；普通同名项目不受此限制。先校验所有权，非所有者返回 404。
+      tags: [Projects]
+      parameters:
+        - {$ref: "#/components/parameters/ExpectedVersion"}
+      responses:
+        "204": {description: 已删除}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /projects/{project_id}/search:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectID"}
+    get:
+      operationId: searchProjectContent
+      summary: 搜索当前项目的记忆、任务描述、评论和用户可见的 Agent 历史会话
+      description: 不搜索内部控制消息、隐藏推理、工具输入输出或 Provider 原始事件。使用最新优先的有界扫描及 Top K 归并；达到数量、候选、扫描字节或单条内容预算时返回 truncated=true，即使结果为空也不代表完整历史无匹配。
+      tags: [Projects]
+      parameters:
+        - {name: q, in: query, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 30}}
+      responses:
+        "200":
+          description: 项目搜索完成
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProjectSearchPageEnvelope"}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /projects/{project_id}/resources:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectID"}
+    get:
+      operationId: listProjectResources
+      summary: 列出项目资源
+      tags: [Projects]
+      responses:
+        "200": {$ref: "#/components/responses/Page"}
+        "401": {$ref: "#/components/responses/Error"}
+    post:
+      operationId: createProjectResource
+      summary: 创建本地目录或 URL 资源
+      tags: [Projects]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ProjectResourceRequest"}
+      responses:
+        "201": {$ref: "#/components/responses/Success"}
+        "400": {$ref: "#/components/responses/Error"}
+  /projects/{project_id}/resources/{resource_id}:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectID"}
+      - {$ref: "#/components/parameters/ResourceID"}
+    patch:
+      operationId: updateProjectResource
+      summary: 按版本更新资源
+      tags: [Projects]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UpdateResourceRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "409": {$ref: "#/components/responses/Error"}
+    delete:
+      operationId: deleteProjectResource
+      summary: 软删除项目资源
+      tags: [Projects]
+      parameters:
+        - {$ref: "#/components/parameters/ExpectedVersion"}
+      responses:
+        "204": {description: 已删除}
+        "409": {$ref: "#/components/responses/Error"}
+  /projects/{project_id}/resources/{resource_id}/validate:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectID"}
+      - {$ref: "#/components/parameters/ResourceID"}
+    post:
+      operationId: validateProjectResource
+      summary: 请求绑定设备验证资源
+      description: |
+        验证结果中的 `valid` 与 `git_detected` 使用资源版本 fence 在同一 UPDATE 中持久化；过期命令结果不能覆盖后续验证。
+        `git_detected` 与项目仓库发现使用同一 nofollow 边界：检查资源自身、作为 partial scope 的上层仓库，
+        以及最多两层的普通 nested repository；nested `.git` 文件（submodule/linked worktree）不会被隐式跟随。
+        检测最多确认 100 个仓库，并受 2 秒、20000 目录和 100000 条目录项预算约束。
+      tags: [Projects]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ExpectedVersionRequest"}
+      responses:
+        "202": {$ref: "#/components/responses/Success"}
+        "409": {$ref: "#/components/responses/Error"}
+  /projects/{project_id}/resources/{resource_id}/open:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectID"}
+      - {$ref: "#/components/parameters/ResourceID"}
+    post:
+      operationId: openProjectResource
+      summary: 使用本机文件管理器、终端或 IDE 打开已登记的代码目录
+      tags: [Projects]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [opener_id]
+              properties:
+                opener_id: {type: string}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+  /projects/{project_id}/git/repositories:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectID"}
+    get:
+      operationId: listProjectGitRepositories
+      summary: 从已就绪代码目录临时发现并读取项目 Git 仓库
+      description: 只向 Runtime 传递 `status=ready` 且 `git_detected=true` 的绝对代码目录。
+      tags: [Projects]
+      parameters:
+        - name: refresh
+          in: query
+          schema: {type: boolean, default: false}
+      responses:
+        "200": {$ref: "#/components/responses/GitRepositoryList"}
+        "404": {$ref: "#/components/responses/Error"}
+        "413": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+  /projects/{project_id}/git/repositories/{repository_id}/changes:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectID"}
+      - name: repository_id
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      operationId: listProjectGitChanges
+      summary: 分区分页读取仓库工作树变更
+      tags: [Projects]
+      parameters:
+        - name: area
+          in: query
+          description: 为空时按 conflict、staged、unstaged、untracked 的稳定顺序返回全部分区
+          schema: {type: string, enum: ["", conflict, staged, unstaged, untracked], default: ""}
+        - name: cursor
+          in: query
+          schema: {type: string}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 500, default: 200}
+        - name: prefix
+          in: query
+          schema: {type: string}
+        - name: expand_untracked
+          in: query
+          schema: {type: boolean, default: false}
+      responses:
+        "200": {$ref: "#/components/responses/GitChangesPage"}
+        "400": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "413": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+  /projects/{project_id}/git/repositories/{repository_id}/changes/{change_id}/diff:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectID"}
+      - name: repository_id
+        in: path
+        required: true
+        schema: {type: string}
+      - name: change_id
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      operationId: getProjectGitDiff
+      summary: 通过服务端变更快照 ID 临时读取安全差异
+      tags: [Projects]
+      parameters:
+        - name: context
+          in: query
+          schema: {type: integer, minimum: 0, maximum: 20, default: 3}
+        - name: allow_large
+          in: query
+          schema: {type: boolean, default: false}
+      responses:
+        "200": {$ref: "#/components/responses/GitDiffResult"}
+        "400": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "413": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+  /projects/{project_id}/git/refresh:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectID"}
+    post:
+      operationId: refreshProjectGit
+      summary: 使项目 Git 临时快照失效并重新发现
+      tags: [Projects]
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "404": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+  /projects/{project_id}/git/events:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectID"}
+    get:
+      operationId: streamProjectGitEvents
+      summary: 订阅仅含仓库 ID、代次和原因的 Git 失效事件
+      tags: [Projects]
+      responses:
+        "200":
+          description: Git 仓库状态事件流
+          content:
+            text/event-stream:
+              schema: {type: string}
+        "404": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+  /computers/{computer_id}/agents:
+    parameters:
+      - {$ref: "#/components/parameters/ComputerID"}
+    get:
+      operationId: listAgents
+      summary: 列出本机配置的 Agent
+      tags: [Agents]
+      responses:
+        "200": {$ref: "#/components/responses/Page"}
+        "401": {$ref: "#/components/responses/Error"}
+    post:
+      operationId: createAgent
+      summary: 创建 Agent（引用 AgentService + 固定模型 + 提示词 + Skills）
+      tags: [Agents]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateAgentRequest"}
+      responses:
+        "201": {$ref: "#/components/responses/Success"}
+        "400": {$ref: "#/components/responses/Error"}
+  /agents/{agent_id}:
+    parameters:
+      - {$ref: "#/components/parameters/AgentID"}
+    get:
+      operationId: getAgent
+      summary: 获取 Agent 配置
+      tags: [Agents]
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "404": {$ref: "#/components/responses/Error"}
+    patch:
+      operationId: updateAgent
+      summary: 更新 Agent；配置变更生成新 AgentRevision
+      tags: [Agents]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UpdateAgentRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "409": {$ref: "#/components/responses/Error"}
+    delete:
+      operationId: deleteAgent
+      summary: 软删除 Agent
+      tags: [Agents]
+      parameters:
+        - {$ref: "#/components/parameters/ExpectedVersion"}
+      responses:
+        "204": {description: 已删除}
+        "409": {$ref: "#/components/responses/Error"}
+  /agent-revisions/{revision_id}:
+    parameters:
+      - {$ref: "#/components/parameters/RevisionID"}
+    get:
+      operationId: getAgentRevision
+      summary: 获取不可变 Agent 修订与绑定 Skills
+      tags: [Agents]
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "404": {$ref: "#/components/responses/Error"}
+  /skill-packages:
+    get:
+      operationId: listSkillPackages
+      summary: 列出 Skills 商店条目
+      tags: [Agents]
+      responses:
+        "200": {$ref: "#/components/responses/Page"}
+        "401": {$ref: "#/components/responses/Error"}
+  /computers/{computer_id}/computer-use:
+    parameters:
+      - {$ref: "#/components/parameters/ComputerID"}
+    get:
+      operationId: getComputerUseStatus
+      summary: 检测本机 open-computer-use 官方 MCP 的安装状态
+      description: >-
+        检测本机 open-computer-use 命令是否可用（含常见 npm 全局 bin 目录）及其版本，
+        并报告 npm 是否可用于一键安装。浏览器与 Wails 均通过本地服务使用。
+      tags: [Computers]
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "404": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+    post:
+      operationId: installComputerUse
+      summary: 一键 npm 全局安装 open-computer-use
+      description: >-
+        通过检测到的 npm 执行 `npm install -g open-computer-use`（有界输出、超时），
+        安装成功后返回最新检测状态；这是用户显式点击触发的本地维护操作。
+      tags: [Computers]
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "404": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+    patch:
+      operationId: setComputerUseEnabled
+      summary: 设置新 Run 的 Computer Use 开关
+      description: 只保存配置；不会安装软件、启动 MCP 或执行桌面操作。
+      tags: [Computers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_version, enabled]
+              properties:
+                expected_version: {type: integer, format: int64, minimum: 1}
+                enabled: {type: boolean}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /computers/{computer_id}/skill-packages:
+    parameters:
+      - {$ref: "#/components/parameters/ComputerID"}
+    get:
+      operationId: listComputerSkillPackages
+      summary: 列出已安装到本机的 Skill 版本
+      tags: [Agents]
+      responses:
+        "200": {$ref: "#/components/responses/Page"}
+        "404": {$ref: "#/components/responses/Error"}
+    post:
+      operationId: installComputerSkillPackage
+      summary: 从 Skills 商店安装到本机
+      description: >-
+        由本机运行时从商店声明的 HTTPS GitHub 仓库解析并固定 commit，下载所选目录，
+        拒绝路径穿越和非普通文件，校验至少一个 SKILL.md 并计算内容摘要；只有真实文件
+        原子落盘成功后才登记安装版本。重复安装同一个已验证版本会复用记录；不同版本需要先从
+        Agent 中解绑并卸载当前版本。
+      tags: [Agents]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/InstallComputerSkillPackageRequest"}
+      responses:
+        "201": {$ref: "#/components/responses/Success"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+  /computers/{computer_id}/skill-packages/{installation_id}:
+    parameters:
+      - {$ref: "#/components/parameters/ComputerID"}
+      - name: installation_id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: "#/components/parameters/ExpectedVersion"}
+    delete:
+      operationId: uninstallComputerSkillPackage
+      summary: 从本机卸载 Skill；正在被 Agent 使用时拒绝
+      description: 所有权、版本和当前/活动运行绑定在同一写事务内校验；只有文件删除确认成功才提交安装记录删除。文件失败或提交失败保留可重试记录，不承诺恢复部分删除的文件。
+      tags: [Agents]
+      responses:
+        "204": {description: 已卸载}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+        "503": {description: skill_uninstall_failed 或 skill_uninstall_incomplete；安装记录保留，按返回的 retry_action 重试}
+  /computers/{computer_id}/skill-packages/{installation_id}/open:
+    parameters:
+      - {$ref: "#/components/parameters/ComputerID"}
+      - name: installation_id
+        in: path
+        required: true
+        schema: {type: string}
+    post:
+      operationId: openComputerSkillPackage
+      summary: 用本机文件管理器打开已安装 Skill 的目录
+      description: 只打开已经真实存在且包含 SKILL.md 的安装目录；不会为缺失安装创建空目录。
+      tags: [Agents]
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "404": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+  /projects/{project_id}/conversation-graphs:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectID"}
+    get:
+      operationId: listConversationGraphs
+      summary: 列出项目的图对话
+      tags: [Conversations]
+      responses:
+        "200": {$ref: "#/components/responses/ConversationGraphPage"}
+        "401": {$ref: "#/components/responses/Error"}
+    post:
+      operationId: createConversationGraph
+      summary: 创建图对话（可延迟选择根节点 Agent）
+      description: title 为空时默认为新对话；省略 agent_id 时持久化空图，nodes/messages/goals 均为空数组，不创建占位节点。提供 agent_id 保留直接创建根节点的能力，node_title 为空时根节点标题为新节点。
+      tags: [Conversations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateConversationGraphRequest"}
+      responses:
+        "201": {$ref: "#/components/responses/ConversationGraphDetail"}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /conversation-graphs/{graph_id}:
+    parameters:
+      - {$ref: "#/components/parameters/GraphID"}
+    get:
+      operationId: getConversationGraph
+      summary: 获取图对话详情
+      tags: [Conversations]
+      responses:
+        "200": {$ref: "#/components/responses/ConversationGraphDetail"}
+        "404": {$ref: "#/components/responses/Error"}
+    patch:
+      operationId: updateConversationGraph
+      summary: 修改图对话标题
+      description: 只校验归属与 expected_version，不受节点锁定、运行或 Goal 状态限制。显式提交相同标题也终止自动命名。
+      tags: [Conversations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UpdateConversationGraphRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/ConversationGraph"}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+    delete:
+      operationId: deleteConversationGraph
+      summary: 删除图对话
+      tags: [Conversations]
+      parameters:
+        - {$ref: "#/components/parameters/ExpectedVersion"}
+      responses:
+        "204": {description: 删除成功}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /conversation-graphs/{graph_id}/root:
+    parameters:
+      - {$ref: "#/components/parameters/GraphID"}
+    post:
+      operationId: initializeConversationGraphRoot
+      summary: 为持久化空图选择 Agent 并初始化真实根节点
+      description: 空图校验 expected_version 并原子创建标题为新节点的根节点，增加图版本。同 Agent 重试返回现有根节点，不增加节点或版本；已存在其它 Agent 的根节点返回 409。
+      tags: [Conversations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/InitializeConversationGraphRootRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/ConversationNode"}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /conversation-nodes/{node_id}:
+    parameters:
+      - {$ref: "#/components/parameters/NodeID"}
+    get:
+      operationId: getConversationNode
+      summary: 获取对话节点
+      tags: [Conversations]
+      responses:
+        "200": {$ref: "#/components/responses/ConversationNode"}
+        "404": {$ref: "#/components/responses/Error"}
+    patch:
+      operationId: updateConversationNode
+      summary: 更新对话节点
+      description: 标题和布局可随时修改，包括已锁定的历史节点。agent_id 变更必须同事务校验归属、版本、未锁定、无活动 Run 和任何未终态 Goal，并绑定目标 Agent 的当前 revision；同 Agent 为 no-op，不升级 revision 或版本。历史消息及 Run 的归属不改写。显式提交相同标题也终止自动命名。
+      tags: [Conversations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UpdateConversationNodeRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/ConversationNode"}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+    delete:
+      operationId: deleteConversationNode
+      summary: 删除对话节点及其分支
+      tags: [Conversations]
+      parameters:
+        - {$ref: "#/components/parameters/ExpectedVersion"}
+      responses:
+        "204": {description: 删除成功}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /conversation-nodes/{node_id}/fork:
+    parameters:
+      - {$ref: "#/components/parameters/NodeID"}
+    post:
+      operationId: forkConversationNode
+      summary: 基于一条 Agent 消息分叉
+      description: 仅允许无活动 Run 和未结束目标的节点，基于其已发布 Agent 消息原子新增两个节点。新冻结父副本仅含截至分叉点的历史；原节点保留全部消息、Run 关联和继承上下文，作为可写完整延续分支；返回的新分支继承截至分叉点的快照，同样可写。三者继承源节点的持久化宽高，原有后代仅整体平移。已冻结源节点也可分叉，此时只解锁源本身，不改变旧后代状态。
+      tags: [Conversations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ForkConversationNodeRequest"}
+      responses:
+        "201": {$ref: "#/components/responses/ConversationNode"}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /conversation-nodes/{node_id}/messages:
+    parameters:
+      - {$ref: "#/components/parameters/NodeID"}
+    get:
+      operationId: listConversationMessages
+      summary: 列出节点消息
+      tags: [Conversations]
+      responses:
+        "200": {$ref: "#/components/responses/ConversationMessagePage"}
+        "404": {$ref: "#/components/responses/Error"}
+    post:
+      operationId: createConversationMessage
+      summary: 原子提交用户消息并启动节点运行
+      description: 用户消息、Agent 回复占位、Run、状态、首次自动命名队列与 outbox 在同一事务提交。可选 expected_agent_id/expected_agent_revision_id 用于绑定 UI 显示的 Agent；不匹配返回 409。幂等指纹包含内容与两项绑定，先重放再校验当前绑定，因此历史重试不受后续换 Agent 影响。忙碌或 Provider 不可用时不写入任何消息。
+      tags: [Conversations]
+      parameters:
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateConversationMessageRequest"}
+      responses:
+        "201": {$ref: "#/components/responses/ConversationMessage"}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /conversation-nodes/{node_id}/goal:
+    parameters:
+      - {$ref: "#/components/parameters/NodeID"}
+    get:
+      operationId: getConversationGoal
+      summary: 获取图节点最近的持续目标
+      tags: [Conversations]
+      responses:
+        "200":
+          description: 无目标时 goal 为 null
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: "#/components/schemas/SuccessEnvelope"}
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          goal:
+                            anyOf:
+                              - {$ref: "#/components/schemas/ConversationGoal"}
+                              - {type: "null"}
+        "404": {$ref: "#/components/responses/Error"}
+  /conversation-nodes/{node_id}/goals:
+    parameters:
+      - {$ref: "#/components/parameters/NodeID"}
+    post:
+      operationId: createConversationGoal
+      summary: 原子创建节点持续目标及首轮运行
+      description: 工作与审核使用独立 Run。保留图对话只读权限，不发布 Issue 评论。objective、预算及可选 expected_agent_id/expected_agent_revision_id 共同构成幂等指纹；先重放再校验当前绑定。首次 objective 在同一事务排入节点及图的自动命名队列。Token 预算包含审核开销，按 Provider usage 事件执行停止，不能保证调用中精确截断。
+      tags: [Conversations]
+      parameters:
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [objective]
+              properties:
+                objective: {type: string, minLength: 1, maxLength: 5000}
+                token_budget: {type: [integer, "null"], minimum: 1000, maximum: 100000000}
+                expected_agent_id: {type: string, minLength: 1}
+                expected_agent_revision_id: {type: string, minLength: 1}
+      responses:
+        "202": {$ref: "#/components/responses/ConversationGoal"}
+        "200": {$ref: "#/components/responses/ConversationGoal"}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /conversation-nodes/{node_id}/goals/{goal_id}/{action}:
+    parameters:
+      - {$ref: "#/components/parameters/NodeID"}
+      - {name: goal_id, in: path, required: true, schema: {type: string}}
+      - {name: action, in: path, required: true, schema: {type: string, enum: [pause, resume, cancel]}}
+    post:
+      operationId: changeConversationGoal
+      summary: 暂停、恢复或取消节点目标
+      description: 暂停和取消持久化停止请求；停止中不能恢复。取消后保留历史消息，结束前普通发送、删除和分支均拒绝。
+      tags: [Conversations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_version]
+              properties:
+                expected_version: {type: integer, format: int64, minimum: 1}
+      responses:
+        "200": {$ref: "#/components/responses/ConversationGoal"}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /projects/{project_id}/issues:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectID"}
+    get:
+      operationId: listIssues
+      summary: 列出项目任务（Issue）
+      description: |
+        不带以下查询参数时保留完整列表与 created_at、id 升序，供内部完整列表调用者使用。
+        提供任一参数即启用分页：默认每页 100 条，按 updated_at、id 降序稳定排列；
+        status 和 search 在整个项目上过滤后再分页，total 是过滤后的总数。
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 100}
+        - name: offset
+          in: query
+          schema: {type: integer, minimum: 0, maximum: 1000000, default: 0}
+        - name: search
+          in: query
+          description: 标题字面子串，去除首尾空白，Unicode 不区分大小写；不搜索描述或评论。
+          schema: {type: string, maxLength: 500}
+        - name: status
+          in: query
+          schema: {type: string, enum: ["", open, resolved, closed]}
+      tags: [Issues]
+      responses:
+        "200": {$ref: "#/components/responses/IssuePage"}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+    post:
+      operationId: createIssue
+      summary: 创建任务
+      tags: [Issues]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateIssueRequest"}
+      responses:
+        "201": {$ref: "#/components/responses/Issue"}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+  /issues/{issue_id}:
+    parameters:
+      - {$ref: "#/components/parameters/IssueID"}
+    get:
+      operationId: getIssue
+      summary: 获取任务
+      tags: [Issues]
+      responses:
+        "200": {$ref: "#/components/responses/Issue"}
+        "404": {$ref: "#/components/responses/Error"}
+    patch:
+      operationId: updateIssue
+      summary: 按版本更新任务（标题/状态/worktree 提示）
+      description: 任务描述创建后只读；请求包含 description（包括 null）时返回 400，整个更新不生效。
+      tags: [Issues]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UpdateIssueRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/Issue"}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+    delete:
+      operationId: deleteIssue
+      summary: 软删除任务
+      tags: [Issues]
+      parameters:
+        - {$ref: "#/components/parameters/ExpectedVersion"}
+      responses:
+        "204": {description: 已删除}
+        "409": {$ref: "#/components/responses/Error"}
+  /issues/{issue_id}/comments:
+    parameters:
+      - {$ref: "#/components/parameters/IssueID"}
+    get:
+      operationId: listIssueComments
+      summary: 列出任务评论流
+      description: 分工评论的 work_items 包含持久工作定义及实时状态、实例、Run、结果评论和阻塞依赖；刷新后仍可观察。
+      tags: [Issues]
+      responses:
+        "200":
+          description: 评论和工作项状态
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [items]
+                    properties:
+                      items: {type: array, items: {$ref: "#/components/schemas/IssueComment"}}
+                  meta: {$ref: "#/components/schemas/ResponseMeta"}
+        "401": {$ref: "#/components/responses/Error"}
+    post:
+      operationId: createIssueComment
+      summary: 发表单 Agent 评论或原子提交多份工作
+      description: |
+        普通用户评论最多携带一个 mentioned_agent_ids；多 Agent 或同 Agent 多份独立工作必须使用 work_items。
+        两种激活方式互斥，正文中的 @ 不额外产生激活。work_items 非空时必须提供 Idempotency-Key，
+        同键同内容重试返回原评论，变更内容返回 409；评论、工作定义及可执行 mention 原子提交。
+        每项创建独立会话，after 指向本批次工作 key；全部前置成功且发布结果后才调度后续，失败或停止阻塞后续。
+      tags: [Issues]
+      parameters:
+        - {name: Idempotency-Key, in: header, schema: {type: string}, description: 提交 work_items 时必填；普通评论不要求}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateIssueCommentRequest"}
+      responses:
+        "201":
+          description: 已提交的评论；分工请求重试返回同一评论
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/IssueComment"}
+                  meta: {$ref: "#/components/schemas/ResponseMeta"}
+        "400": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /issues/{issue_id}/work-plan:
+    parameters:
+      - {$ref: "#/components/parameters/IssueID"}
+    post:
+      operationId: generateIssueWorkPlan
+      summary: 显式使用已配置 Agent 整理可编辑分工草案
+      description: |
+        仅生成草案，不创建评论、mention、业务 Run 或实例。整理者须属于当前项目电脑且支持严格 no_tools；
+        不支持时拒绝，不以 readonly 或提示词降级，不自动切换 Provider。使用已保存的模型，不加载 Skills、
+        MCP 或项目工作目录。返回工作只可指向 agent_ids 白名单，用户确认后须另行提交 comments。
+        失败保留客户端草稿，原始 Provider 错误和原始模型响应不回显。调用会产生一次真实模型请求。
+      tags: [Issues]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [agent_id, input, agent_ids]
+              properties:
+                agent_id: {type: string, minLength: 1, description: 明确选择的整理 Agent}
+                input: {type: string, minLength: 1, maxLength: 65536, description: input 与 Agent 名单的 JSON 编码（含转义）总量不超过 64 KiB；超限在调用模型前返回 400}
+                agent_ids: {type: array, minItems: 1, maxItems: 64, uniqueItems: true, items: {type: string}}
+      responses:
+        "200":
+          description: 已校验的草案，尚未执行
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [work_items]
+                    properties:
+                      work_items: {type: array, minItems: 1, maxItems: 32, items: {$ref: "#/components/schemas/IssueWorkItemInput"}}
+                  meta: {$ref: "#/components/schemas/ResponseMeta"}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /comments/{comment_id}:
+    parameters:
+      - {$ref: "#/components/parameters/CommentID"}
+    patch:
+      operationId: updateIssueComment
+      summary: 编辑用户评论（仅用户自己发送的评论；Agent 评论返回 403）
+      tags: [Issues]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UpdateIssueCommentRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "403": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+    delete:
+      operationId: deleteIssueComment
+      summary: 删除评论（用户评论与 Agent 评论都可以删除；未派发的 @ 同时失效）
+      tags: [Issues]
+      parameters:
+        - {$ref: "#/components/parameters/ExpectedVersion"}
+      responses:
+        "204": {description: 已删除}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /comments/{comment_id}/revisions:
+    parameters:
+      - {$ref: "#/components/parameters/CommentID"}
+    get:
+      operationId: listIssueCommentRevisions
+      summary: 读取评论修订历史
+      tags: [Issues]
+      responses:
+        "200": {$ref: "#/components/responses/Page"}
+        "401": {$ref: "#/components/responses/Error"}
+  /issues/{issue_id}/agent-instances:
+    parameters:
+      - {$ref: "#/components/parameters/IssueID"}
+    get:
+      operationId: listIssueAgentInstances
+      summary: 列出任务中参与的 Agent 实例
+      tags: [Issues]
+      responses:
+        "200": {$ref: "#/components/responses/Page"}
+        "401": {$ref: "#/components/responses/Error"}
+  /issues/{issue_id}/agent-instances/{instance_id}/pause:
+    parameters:
+      - {$ref: "#/components/parameters/IssueID"}
+      - {$ref: "#/components/parameters/InstanceID"}
+    post:
+      operationId: pauseIssueAgentInstance
+      summary: 暂停单个 Agent 实例
+      tags: [Issues]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ExpectedVersionRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "409": {$ref: "#/components/responses/Error"}
+  /issues/{issue_id}/agent-instances/{instance_id}/resume:
+    parameters:
+      - {$ref: "#/components/parameters/IssueID"}
+      - {$ref: "#/components/parameters/InstanceID"}
+    post:
+      operationId: resumeIssueAgentInstance
+      summary: 恢复暂停的 Agent 实例
+      tags: [Issues]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ExpectedVersionRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "409": {$ref: "#/components/responses/Error"}
+  /issues/{issue_id}/runs:
+    parameters:
+      - {$ref: "#/components/parameters/IssueID"}
+    get:
+      operationId: listIssueRuns
+      summary: 按最新优先游标分页列出任务下的 Run
+      tags: [Issues]
+      parameters:
+        - {name: cursor, in: query, required: false, schema: {type: string}, description: 服务端生成的 created_at+id 不透明游标}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200, default: 200}}
+      responses:
+        "200": {$ref: "#/components/responses/RunPage"}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+    post:
+      operationId: createIssueRun
+      summary: 激活 Agent 执行（@Agent / sidesheet 追问）
+      description: 服务端基于 Issue 上下文组装有界 prompt，采用最近已发布评论并显式提示历史裁剪；本次指令最多 64 KiB，不会静默裁剪。模型与提示词由 Agent 配置决定。
+      tags: [Issues]
+      parameters:
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateIssueRunRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/Run"}
+        "202": {$ref: "#/components/responses/Run"}
+        "400": {$ref: "#/components/responses/Error"}
+        "413": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+  /agent-instances/{instance_id}/runs:
+    parameters:
+      - {$ref: "#/components/parameters/InstanceID"}
+    get:
+      operationId: listInstanceRuns
+      summary: 稳定游标分页列出 Agent 实例的全部 Run
+      tags: [Issues]
+      parameters:
+        - {name: cursor, in: query, required: false, schema: {type: string}, description: 服务端生成的 created_at+id 不透明游标}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+      responses:
+        "200": {$ref: "#/components/responses/RunPage"}
+        "401": {$ref: "#/components/responses/Error"}
+  /agent-instances/{instance_id}/goal:
+    parameters:
+      - {$ref: "#/components/parameters/InstanceID"}
+    get:
+      operationId: getCurrentIssueAgentGoal
+      summary: 获取当前会话最近的持续目标
+      description: >-
+        没有目标时返回 `{"goal": null}`；目标循环仅由本地桌面 SQLite 运行时驱动。
+      tags: [Issues]
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "404": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+  /goals/{goal_id}/pause:
+    parameters:
+      - {$ref: "#/components/parameters/GoalID"}
+    post:
+      operationId: pauseIssueAgentGoal
+      summary: 暂停持续目标并停止当前轮次
+      tags: [Issues]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ExpectedVersionRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "409": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+  /goals/{goal_id}/resume:
+    parameters:
+      - {$ref: "#/components/parameters/GoalID"}
+    post:
+      operationId: resumeIssueAgentGoal
+      summary: 恢复持续目标
+      tags: [Issues]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ExpectedVersionRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "409": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+  /goals/{goal_id}/cancel:
+    parameters:
+      - {$ref: "#/components/parameters/GoalID"}
+    post:
+      operationId: cancelIssueAgentGoal
+      summary: 取消持续目标并停止当前轮次
+      tags: [Issues]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ExpectedVersionRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "409": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+  /issues/{issue_id}/events:
+    parameters:
+      - {$ref: "#/components/parameters/IssueID"}
+    get:
+      operationId: streamIssueEvents
+      summary: 通过 SSE 订阅任务级事件流
+      description: 分页补齐该任务全部 Run 的已持久化事件；每个 Run 内按 seq 有序，不保证不同 Run 间的时间全序。订阅通知与定期轮询共同驱动补读，单页尾部不会等待下一次通知。评论与实例变更通过 issue.changed 提示重新查询。
+      tags: [Issues]
+      responses:
+        "200":
+          description: SSE 事件流
+          content:
+            text/event-stream:
+              schema: {type: string}
+        "401": {$ref: "#/components/responses/Error"}
+  /runs/{run_id}:
+    parameters:
+      - {$ref: "#/components/parameters/RunID"}
+    get:
+      operationId: getRun
+      summary: 获取权威 Run 状态
+      tags: [Issues]
+      responses:
+        "200": {$ref: "#/components/responses/Run"}
+        "404": {$ref: "#/components/responses/Error"}
+  /runs/{run_id}/events:
+    parameters:
+      - {$ref: "#/components/parameters/RunID"}
+    get:
+      operationId: listRunEvents
+      summary: 分页按本地顺序读取 Run 事件
+      description: |
+        使用事件 `seq` 作为仅向前的游标；每页除条数限制外还有约 8 MiB 的累计紧凑 payload
+        wire 字节预算。服务端先按持久化字节数选择安全页，再读取这些事件的 payload。
+        达到任一边界时 `truncated=true`，客户端必须用 `next_cursor` 继续读取；内部 wire
+        大小元数据不会出现在响应中。
+      tags: [Issues]
+      parameters:
+        - {name: after, in: query, required: false, schema: {type: integer, format: int64, minimum: 0, default: 0}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 500, default: 100}}
+        - {name: view, in: query, required: false, schema: {type: string, enum: [activity]}, description: "activity 省略 Provider patch/diff 大字段并保留路径摘要；完整报告从 Run Git changes 端点按需读取"}
+      responses:
+        "200":
+          description: 有界 Run 事件页；截断时 `next_cursor` 是最后一个已返回事件的 `seq`
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RunEventPageEnvelope"}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+  /runs/{run_id}/events/stream:
+    parameters:
+      - {$ref: "#/components/parameters/RunID"}
+    get:
+      operationId: streamRunEvents
+      summary: 通过 SSE 订阅 Run 增量事件
+      description: |
+        `after_seq` 用于重连补流。SSE 只负责低延迟通知，HTTP 事件列表仍是历史权威。
+        客户端必须按 `seq` 去重并在发现缺口后重新读取持久事件。
+      tags: [Issues]
+      parameters:
+        - {name: after_seq, in: query, required: false, schema: {type: integer, format: int64, minimum: 0, default: 0}}
+      responses:
+        "200":
+          description: SSE 事件流
+          content:
+            text/event-stream:
+              schema: {type: string}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /runs/{run_id}/git/changes:
+    parameters:
+      - {$ref: "#/components/parameters/RunID"}
+    get:
+      operationId: getRunGitChanges
+      summary: 读取 Run 的本地 Git 起止观察与 Provider 变更报告
+      description: |
+        服务端先按当前租户验证 Run，再把 Run ID 传给本机 Runtime。快照来自运行开始/结束时的
+        Git 工作区观察，可能包含并发用户或其他 Agent 变更，不能据此声称为该 Agent 独占修改。
+        Provider 报告从 `workspace.diff`、`files.changed` 或 Provider API 的显式文件变更投影标准化。
+        响应不会包含仓库绝对路径。无法证明为仓库相对路径的 Provider 路径只返回安全显示名，
+        并以 `paths_verified=false`、`scope=unverified` 标记，客户端不得归入 Run 仓库。
+        Provider 事件按游标有界扫描；没有快照或报告时返回空数组。整个 JSON
+        响应（快照、路径、Provider 报告和 envelope）不得超过约 20 MiB；达到预算时
+        截断报告并返回已安全扫描到的 Run event sequence `next_provider_cursor`。该游标可能
+        跨过不产生报告的事件，客户端必须原样用于下一次 `after_provider_seq`。
+      tags: [Issues]
+      parameters:
+        - {name: after_provider_seq, in: query, required: false, schema: {type: integer, format: int64, minimum: 0, default: 0}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100, default: 100}, description: 单响应 Provider 报告上限}
+      responses:
+        "200": {$ref: "#/components/responses/GitRunChangesResult"}
+        "401": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "413": {$ref: "#/components/responses/Error"}
+        "501": {$ref: "#/components/responses/Error"}
+  /runs/{run_id}/stop:
+    parameters:
+      - {$ref: "#/components/parameters/RunID"}
+    post:
+      operationId: stopRun
+      summary: 请求精确停止 Run
+      tags: [Issues]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/StopRunRequest"}
+      responses:
+        "202": {$ref: "#/components/responses/Run"}
+        "400": {$ref: "#/components/responses/Error"}
+        "413": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /runs/{run_id}/steer:
+    parameters:
+      - {$ref: "#/components/parameters/RunID"}
+    post:
+      operationId: steerRun
+      summary: 向正在执行的 Agent 追加干预指令
+      tags: [Issues]
+      parameters:
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                input: {type: string}
+                attachments:
+                  type: array
+                  maxItems: 4
+                  items: {$ref: "#/components/schemas/ImageContentBlock"}
+                  description: 仅接受公开 image 内容块；单张解码后不超过 512 KiB，总计不超过 768 KiB
+                internal:
+                  type: boolean
+                  default: false
+                  description: 内部控制消息；发送给 Provider，但不作为用户消息展示在会话侧栏
+      responses:
+        "202": {$ref: "#/components/responses/Run"}
+        "409": {$ref: "#/components/responses/Error"}
+  /projects/{project_id}/memories:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectID"}
+    get:
+      operationId: listProjectMemories
+      summary: 列出活动或归档项目记忆
+      tags: [Memory]
+      parameters:
+        - {name: archived, in: query, required: false, schema: {type: boolean, default: false}, description: true 仅列出已归档记忆；默认仅列出当前记忆}
+      responses:
+        "200": {$ref: "#/components/responses/Page"}
+        "401": {$ref: "#/components/responses/Error"}
+    post:
+      operationId: createProjectMemory
+      summary: 创建有稳定 key 的项目记忆
+      tags: [Memory]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateMemoryRequest"}
+      responses:
+        "201": {$ref: "#/components/responses/Success"}
+        "409": {$ref: "#/components/responses/Error"}
+  /projects/{project_id}/memories/{memory_id}:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectID"}
+      - {$ref: "#/components/parameters/MemoryID"}
+    get:
+      operationId: getProjectMemory
+      summary: 获取项目记忆
+      tags: [Memory]
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "401": {$ref: "#/components/responses/Error"}
+    patch:
+      operationId: updateProjectMemory
+      summary: 按版本更新并保留历史
+      tags: [Memory]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UpdateMemoryRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "409": {$ref: "#/components/responses/Error"}
+  /projects/{project_id}/memories/{memory_id}/archive:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectID"}
+      - {$ref: "#/components/parameters/MemoryID"}
+    post:
+      operationId: archiveProjectMemory
+      summary: 归档项目记忆
+      tags: [Memory]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ExpectedVersionRequest"}
+      responses:
+        "204": {description: 已归档}
+        "409": {$ref: "#/components/responses/Error"}
+  /projects/{project_id}/memories/{memory_id}/restore:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectID"}
+      - {$ref: "#/components/parameters/MemoryID"}
+    post:
+      operationId: restoreProjectMemory
+      summary: 恢复项目记忆
+      tags: [Memory]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ExpectedVersionRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "409": {$ref: "#/components/responses/Error"}
+  /projects/{project_id}/memories/{memory_id}/versions:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectID"}
+      - {$ref: "#/components/parameters/MemoryID"}
+    get:
+      operationId: listProjectMemoryVersions
+      summary: 列出项目记忆历史版本
+      tags: [Memory]
+      responses:
+        "200": {$ref: "#/components/responses/Page"}
+        "401": {$ref: "#/components/responses/Error"}
+  /approvals:
+    get:
+      operationId: listApprovals
+      description: 到期审批在持久化事务内转为 expired，并排队向 Provider 发送 denied/once；不会超时自动批准，pending 查询不保留已过期项。
+      summary: 按状态列出审批
+      tags: [Approval]
+      parameters:
+        - {name: status, in: query, required: false, schema: {type: string}}
+      responses:
+        "200": {$ref: "#/components/responses/Page"}
+        "401": {$ref: "#/components/responses/Error"}
+  /approvals/{approval_id}:
+    parameters:
+      - {$ref: "#/components/parameters/ApprovalID"}
+    get:
+      operationId: getApproval
+      summary: 获取审批和动作摘要
+      tags: [Approval]
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "404": {$ref: "#/components/responses/Error"}
+  /approvals/{approval_id}/decisions:
+    parameters:
+      - {$ref: "#/components/parameters/ApprovalID"}
+    post:
+      operationId: decideApproval
+      summary: 对未过期且动作摘要未变化的审批做决定
+      tags: [Approval]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ApprovalDecisionRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "409": {$ref: "#/components/responses/Error"}
+  /projects/{project_id}/policy-rules:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectID"}
+    get:
+      operationId: listPolicyRules
+      summary: 列出项目策略
+      description: 策略规则当前仅存储，不参与工具执行决策；实际权限由 Provider 原生策略与审批决定。
+      tags: [Approval]
+      responses:
+        "200": {$ref: "#/components/responses/Page"}
+        "401": {$ref: "#/components/responses/Error"}
+    post:
+      operationId: createPolicyRule
+      summary: 创建项目策略
+      description: 仅保存规则，不提供执行拦截或自动审批授权。
+      tags: [Approval]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PolicyRuleRequest"}
+      responses:
+        "201": {$ref: "#/components/responses/Success"}
+        "401": {$ref: "#/components/responses/Error"}
+  /policy-rules/{rule_id}:
+    parameters:
+      - {$ref: "#/components/parameters/RuleID"}
+    patch:
+      operationId: updatePolicyRule
+      summary: 按版本更新策略
+      description: 仅更新策略记录，不改变当前 Provider 的工具权限。
+      tags: [Approval]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UpdatePolicyRuleRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "409": {$ref: "#/components/responses/Error"}
+    delete:
+      operationId: deletePolicyRule
+      summary: 软删除策略
+      tags: [Approval]
+      parameters:
+        - {$ref: "#/components/parameters/ExpectedVersion"}
+      responses:
+        "204": {description: 已删除}
+        "409": {$ref: "#/components/responses/Error"}
+  /projects/{project_id}/scheduled-tasks:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectID"}
+    get:
+      operationId: listScheduledTasks
+      summary: 列出项目计划任务
+      tags: [Automation]
+      responses:
+        "200": {$ref: "#/components/responses/ScheduledTaskPage"}
+        "401": {$ref: "#/components/responses/Error"}
+    post:
+      operationId: createScheduledTask
+      summary: 创建带 IANA 时区的计划任务
+      description: 没有未来触发时间的 Cron（例如二月三十一日）返回 400 schedule_no_next_run，不会创建到期热循环任务。
+      tags: [Automation]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ScheduledTaskRequest"}
+      responses:
+        "201": {$ref: "#/components/responses/ScheduledTask"}
+        "400": {$ref: "#/components/responses/Error"}
+  /scheduled-tasks/{task_id}:
+    parameters:
+      - {$ref: "#/components/parameters/TaskID"}
+    get:
+      operationId: getScheduledTask
+      summary: 获取计划任务
+      tags: [Automation]
+      responses:
+        "200": {$ref: "#/components/responses/ScheduledTask"}
+        "401": {$ref: "#/components/responses/Error"}
+    patch:
+      operationId: updateScheduledTask
+      summary: 按版本替换计划任务配置
+      description: 无未来触发时间的 Cron 返回 400 schedule_no_next_run。
+      tags: [Automation]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateScheduledTaskRequest"
+      responses:
+        "200": {$ref: "#/components/responses/ScheduledTask"}
+        "400": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /scheduled-tasks/{task_id}/pause:
+    parameters:
+      - {$ref: "#/components/parameters/TaskID"}
+    post:
+      operationId: pauseScheduledTask
+      summary: 暂停计划任务
+      tags: [Automation]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ExpectedVersionRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/ScheduledTask"}
+        "401": {$ref: "#/components/responses/Error"}
+  /scheduled-tasks/{task_id}/resume:
+    parameters:
+      - {$ref: "#/components/parameters/TaskID"}
+    post:
+      operationId: resumeScheduledTask
+      summary: 恢复计划任务
+      tags: [Automation]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ExpectedVersionRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/ScheduledTask"}
+        "401": {$ref: "#/components/responses/Error"}
+  /scheduled-tasks/{task_id}/run-now:
+    parameters:
+      - {$ref: "#/components/parameters/TaskID"}
+      - {$ref: "#/components/parameters/IdempotencyKey"}
+    post:
+      operationId: runScheduledTaskNow
+      summary: 使用独立 trigger key 手动触发
+      tags: [Automation]
+      responses:
+        "200": {$ref: "#/components/responses/ScheduledTaskRun"}
+        "202": {$ref: "#/components/responses/ScheduledTaskRun"}
+        "409": {$ref: "#/components/responses/Error"}
+  /scheduled-tasks/{task_id}/runs:
+    parameters:
+      - {$ref: "#/components/parameters/TaskID"}
+    get:
+      operationId: listScheduledTaskRuns
+      summary: 列出计划触发历史
+      tags: [Automation]
+      responses:
+        "200": {$ref: "#/components/responses/ScheduledTaskRunPage"}
+        "401": {$ref: "#/components/responses/Error"}
+  /scheduled-tasks/preview:
+    post:
+      operationId: previewSchedule
+      summary: 预览未来触发点而不创建任务
+      description: 使用与实际调度一致的时区和日历计算；无未来触发时间返回 400 schedule_no_next_run。
+      tags: [Automation]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SchedulePreviewRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "400": {$ref: "#/components/responses/Error"}
+  /audit-events:
+    get:
+      operationId: listAuditEvents
+      summary: 按项目或 Run 查询最近 500 条审计事件
+      tags: [Audit]
+      parameters:
+        - {name: project_id, in: query, required: false, schema: {type: string}}
+        - {name: run_id, in: query, required: false, schema: {type: string}}
+      responses:
+        "200": {$ref: "#/components/responses/Page"}
+        "401": {$ref: "#/components/responses/Error"}
+components:
+  securitySchemes:
+    cookieSession:
+      type: apiKey
+      in: cookie
+      name: am_session
+  parameters:
+    MCPServerName:
+      name: name
+      in: path
+      required: true
+      schema: {type: string, pattern: '^[a-z0-9](?:[a-z0-9_-]{0,126}[a-z0-9])?$'}
+    MCPScopeQuery:
+      name: scope
+      in: query
+      required: true
+      schema: {type: string, enum: [user, project]}
+    MCPProjectQuery:
+      name: project_id
+      in: query
+      schema: {type: string, minLength: 1, maxLength: 256}
+      description: 列表可选；project 目标必填且必须为当前用户拥有的项目，user 目标禁止提供
+    MCPCSRFToken:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      schema: {type: string, minLength: 1}
+      description: 当前本机 HttpOnly Cookie 会话的 CSRF Token；写操作还要求严格同源
+    ProjectID: {name: project_id, in: path, required: true, schema: {type: string}}
+    ResourceID: {name: resource_id, in: path, required: true, schema: {type: string}}
+    TaskID: {name: task_id, in: path, required: true, schema: {type: string}}
+    AgentID: {name: agent_id, in: path, required: true, schema: {type: string}}
+    RevisionID: {name: revision_id, in: path, required: true, schema: {type: string}}
+    GraphID: {name: graph_id, in: path, required: true, schema: {type: string}}
+    NodeID: {name: node_id, in: path, required: true, schema: {type: string}}
+    IssueID: {name: issue_id, in: path, required: true, schema: {type: string}}
+    CommentID: {name: comment_id, in: path, required: true, schema: {type: string}}
+    InstanceID: {name: instance_id, in: path, required: true, schema: {type: string}}
+    RunID: {name: run_id, in: path, required: true, schema: {type: string}}
+    GoalID: {name: goal_id, in: path, required: true, schema: {type: string}}
+    ComputerID: {name: computer_id, in: path, required: true, schema: {type: string}}
+    ServiceID: {name: service_id, in: path, required: true, schema: {type: string}}
+    MemoryID: {name: memory_id, in: path, required: true, schema: {type: string}}
+    ApprovalID: {name: approval_id, in: path, required: true, schema: {type: string}}
+    RuleID: {name: rule_id, in: path, required: true, schema: {type: string}}
+    ExpectedVersion:
+      name: expected_version
+      in: query
+      required: true
+      schema: {type: integer, format: int64, minimum: 1}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 200}
+  headers:
+    NoStore:
+      description: Git 工作区和 Provider 报告不得被中间层或客户端缓存
+      schema: {type: string, const: no-store}
+    NoSniff:
+      description: 禁止浏览器 MIME sniffing
+      schema: {type: string, const: nosniff}
+  responses:
+    MCPServerList:
+      description: 用户级及可选项目级 MCP 脱敏列表；无条目时 items 为 []
+      headers:
+        Cache-Control: {$ref: "#/components/headers/NoStore"}
+      content:
+        application/json:
+          schema:
+            allOf:
+              - {$ref: "#/components/schemas/SuccessEnvelope"}
+              - type: object
+                properties:
+                  data:
+                    type: object
+                    required: [items]
+                    properties:
+                      items: {type: array, items: {$ref: "#/components/schemas/MCPServerView"}}
+    MCPServer:
+      description: MCP 脱敏配置、当前连接状态和能力目录
+      headers:
+        Cache-Control: {$ref: "#/components/headers/NoStore"}
+      content:
+        application/json:
+          schema:
+            allOf:
+              - {$ref: "#/components/schemas/SuccessEnvelope"}
+              - type: object
+                properties:
+                  data: {$ref: "#/components/schemas/MCPServerView"}
+    MCPAuth:
+      description: 显式授权的浏览器 URL 和状态，不包含认证秘密
+      headers:
+        Cache-Control: {$ref: "#/components/headers/NoStore"}
+      content:
+        application/json:
+          schema:
+            allOf:
+              - {$ref: "#/components/schemas/SuccessEnvelope"}
+              - type: object
+                properties:
+                  data: {$ref: "#/components/schemas/MCPAuthResult"}
+    MCPDeleted:
+      description: 指定作用域和版本的 MCP 条目已删除
+      headers:
+        Cache-Control: {$ref: "#/components/headers/NoStore"}
+      content:
+        application/json:
+          schema:
+            allOf:
+              - {$ref: "#/components/schemas/SuccessEnvelope"}
+              - type: object
+                properties:
+                  data:
+                    type: object
+                    required: [deleted]
+                    properties:
+                      deleted: {type: boolean, const: true}
+    FeatureTours:
+      description: 当前用户已显示过的栏目教学，seen 按固定栏目顺序返回
+      headers:
+        Cache-Control: {$ref: "#/components/headers/NoStore"}
+      content:
+        application/json:
+          schema:
+            allOf:
+              - {$ref: "#/components/schemas/SuccessEnvelope"}
+              - type: object
+                properties:
+                  data: {$ref: "#/components/schemas/FeatureTours"}
+    UserPreferences:
+      description: 当前用户界面设置
+      content:
+        application/json:
+          schema:
+            allOf:
+              - {$ref: "#/components/schemas/SuccessEnvelope"}
+              - type: object
+                properties:
+                  data: {$ref: "#/components/schemas/UserPreferences"}
+    Success:
+      description: 操作成功
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/SuccessEnvelope"}
+    Page:
+      description: 列表读取成功
+      content:
+        application/json:
+          schema:
+            allOf:
+              - {$ref: "#/components/schemas/SuccessEnvelope"}
+              - type: object
+                properties:
+                  data: {$ref: "#/components/schemas/Page"}
+    Project:
+      description: 项目读取或写入成功
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ProjectEnvelope"}
+    ProjectPage:
+      description: 项目列表读取成功
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ProjectPageEnvelope"}
+    Error:
+      description: 稳定业务错误
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorEnvelope"}
+    Issue:
+      description: 任务读取或写入成功
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/IssueEnvelope"}
+    ConversationGraphPage:
+      description: 图对话列表读取成功
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ConversationGraphPageEnvelope"}
+    ConversationGraph:
+      description: 图对话
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ConversationGraphEnvelope"}
+    ConversationGraphDetail:
+      description: 图对话详情读取成功
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ConversationGraphDetailEnvelope"}
+    ConversationGoal:
+      description: 节点持续目标
+      content:
+        application/json:
+          schema:
+            allOf:
+              - {$ref: "#/components/schemas/SuccessEnvelope"}
+              - type: object
+                properties:
+                  data: {$ref: "#/components/schemas/ConversationGoal"}
+    ConversationNode:
+      description: 对话节点读取或写入成功
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ConversationNodeEnvelope"}
+    ConversationMessagePage:
+      description: 节点消息列表读取成功
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ConversationMessagePageEnvelope"}
+    ConversationMessage:
+      description: 节点消息创建成功
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ConversationMessageEnvelope"}
+    IssuePage:
+      description: 任务列表读取成功
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/IssuePageEnvelope"}
+    Run:
+      description: 运行创建或读取成功
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/RunEnvelope"}
+    RunPage:
+      description: 运行列表读取成功
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/RunPageEnvelope"}
+    GitRepositoryList:
+      description: Git 仓库发现成功
+      headers:
+        Cache-Control: {$ref: "#/components/headers/NoStore"}
+        X-Content-Type-Options: {$ref: "#/components/headers/NoSniff"}
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/GitRepositoryListEnvelope"}
+    GitChangesPage:
+      description: Git 变更页读取成功
+      headers:
+        Cache-Control: {$ref: "#/components/headers/NoStore"}
+        X-Content-Type-Options: {$ref: "#/components/headers/NoSniff"}
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/GitChangesPageEnvelope"}
+    GitDiffResult:
+      description: Git 差异读取成功
+      headers:
+        Cache-Control: {$ref: "#/components/headers/NoStore"}
+        X-Content-Type-Options: {$ref: "#/components/headers/NoSniff"}
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/GitDiffResultEnvelope"}
+    GitRunChangesResult:
+      description: Run Git 历史读取成功
+      headers:
+        Cache-Control: {$ref: "#/components/headers/NoStore"}
+        X-Content-Type-Options: {$ref: "#/components/headers/NoSniff"}
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/GitRunChangesEnvelope"}
+    ScheduledTask:
+      description: 计划任务读取或写入成功
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ScheduledTaskEnvelope"}
+    ScheduledTaskPage:
+      description: 计划任务列表读取成功
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ScheduledTaskPageEnvelope"}
+    ScheduledTaskRun:
+      description: 计划任务触发成功
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ScheduledTaskRunEnvelope"}
+    ScheduledTaskRunPage:
+      description: 计划任务触发历史读取成功
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ScheduledTaskRunPageEnvelope"}
+  schemas:
+    MCPTarget:
+      type: object
+      additionalProperties: false
+      required: [scope]
+      properties:
+        scope: {type: string, enum: [user, project]}
+        project_id: {type: string, minLength: 1, maxLength: 256}
+        version: {type: integer, format: int64, minimum: 1, description: 可选的页面快照版本；连接与授权始终操作当前保存配置，不修改配置版本}
+      description: user 禁止 project_id；project 必须提供当前用户拥有的项目 ID，不能以名称推断所有权
+      oneOf:
+        - properties:
+            scope: {const: user}
+          not: {required: [project_id], properties: {project_id: {}}}
+        - required: [project_id]
+          properties:
+            scope: {const: project}
+            project_id: {type: string}
+    MCPServerInput:
+      type: object
+      additionalProperties: false
+      required: [name, scope, version, config]
+      properties:
+        name: {type: string, pattern: '^[a-z0-9](?:[a-z0-9_-]{0,126}[a-z0-9])?$'}
+        scope: {type: string, enum: [user, project]}
+        project_id: {type: string, minLength: 1, maxLength: 256}
+        version: {type: integer, format: int64, minimum: 0, description: 0 创建；正整数为旧 View 的乐观版本。新条目使用随机版本种子，后续每次保存严格递增}
+        config: {$ref: "#/components/schemas/MCPConfig"}
+      oneOf:
+        - properties:
+            scope: {const: user}
+          not: {required: [project_id], properties: {project_id: {}}}
+        - required: [project_id]
+          properties:
+            scope: {const: project}
+            project_id: {type: string}
+    MCPSecretValue:
+      type: string
+      maxLength: 65536
+      description: |
+        私有值只进入本机 MCP 私有文件；响应固定为 __TEAMVA_KEEP_SECRET__。
+        提交该哨兵仅保留相同条目/字段的旧秘密，不代表清空或新的真实值；没有旧值时拒绝。
+      examples: [__TEAMVA_KEEP_SECRET__]
+    MCPTimeout:
+      type: object
+      additionalProperties: false
+      description: V2 启动、目录读取和工具执行超时，单位毫秒；各项可省略使用运行时默认值
+      properties:
+        startup: {type: integer, minimum: 1, maximum: 3600000}
+        catalog: {type: integer, minimum: 1, maximum: 3600000}
+        execution: {type: integer, minimum: 1, maximum: 3600000}
+    MCPOAuth:
+      oneOf:
+        - {type: boolean, const: false}
+        - type: object
+          additionalProperties: false
+          properties:
+            client_id: {type: string}
+            client_secret: {$ref: "#/components/schemas/MCPSecretValue"}
+            scope: {type: string}
+            redirect_uri: {type: string, format: uri, description: 仅 http://127.0.0.1 的本机回调 URL，不含 query 或 fragment}
+            auth_server_metadata_url: {type: string, format: uri}
+            callback_port: {type: integer, minimum: 1, maximum: 65535}
+      description: false 显式禁用 OAuth；对象使用 V2 snake_case 字段，省略时按协议发现默认授权能力。本页管理器仅使用随机 loopback 临时回调，固定 callback_port/redirect_uri 仅保存并透传支持该字段的原生 Provider
+    MCPConfig:
+      description: |
+        完整 OpenCode V2 MCP entry 对象。local command 是 argv 数组，不是 shell 字符串；
+        认证秘密放 environment/headers/oauth.client_secret，不得放 command、cwd、URL、目录描述或日志。
+        所有 environment/headers 值（不限于看起来像密钥的名称）均视为敏感值并在 View 中替换为保留哨兵。
+        不接受额外 Provider 字段、camelCase OAuth 字段、用户名密码 URL 或携带认证秘密的 URL 查询参数。
+      oneOf:
+        - {$ref: "#/components/schemas/MCPLocalConfig"}
+        - {$ref: "#/components/schemas/MCPRemoteConfig"}
+    MCPLocalConfig:
+      type: object
+      additionalProperties: false
+      required: [type, command]
+      properties:
+        type: {type: string, const: local}
+        command: {type: array, minItems: 1, maxItems: 256, items: {type: string, maxLength: 8192}, description: 显式 argv；保存不执行，不允许在命令行参数携带秘密}
+        cwd: {type: string, description: 可选的绝对工作目录}
+        environment:
+          type: object
+          maxProperties: 256
+          propertyNames: {pattern: '^[A-Za-z_][A-Za-z0-9_]*$'}
+          additionalProperties: {$ref: "#/components/schemas/MCPSecretValue"}
+        disabled: {type: boolean, default: false}
+        protocol: {type: string, enum: [legacy, auto, "2026-07-28"]}
+        codemode: {type: boolean}
+        timeout: {$ref: "#/components/schemas/MCPTimeout"}
+    MCPRemoteConfig:
+      type: object
+      additionalProperties: false
+      required: [type, url]
+      properties:
+        type: {type: string, const: remote}
+        url: {type: string, format: uri, description: HTTP(S) MCP 端点；禁止 userinfo、fragment 和认证秘密查询参数}
+        environment:
+          type: object
+          maxProperties: 256
+          propertyNames: {pattern: '^[A-Za-z_][A-Za-z0-9_]*$'}
+          additionalProperties: {$ref: "#/components/schemas/MCPSecretValue"}
+        headers:
+          type: object
+          maxProperties: 256
+          additionalProperties: {$ref: "#/components/schemas/MCPSecretValue"}
+          description: 所有 header 值均脱敏；禁止覆盖 Host、Cookie、Set-Cookie、Content-Length、Transfer-Encoding 和 Connection
+        oauth: {$ref: "#/components/schemas/MCPOAuth"}
+        disabled: {type: boolean, default: false}
+        protocol: {type: string, enum: [legacy, auto, "2026-07-28"]}
+        codemode: {type: boolean}
+        timeout: {$ref: "#/components/schemas/MCPTimeout"}
+    MCPServerView:
+      type: object
+      required: [name, scope, version, config, status]
+      properties:
+        name: {type: string}
+        scope: {type: string, enum: [user, project]}
+        project_id: {type: string, description: 仅项目级条目包含此字段}
+        version: {type: integer, format: int64, minimum: 1}
+        config: {$ref: "#/components/schemas/MCPConfig"}
+        status: {type: string, enum: [disconnected, disabled, connecting, connected, error, needs_auth, auth_pending, unsupported], description: 当前显式连接/授权状态；保存或重启不自动连接}
+        shadowed: {type: boolean, description: 个人条目已被当前项目的同名配置覆盖（包括项目禁用条目）}
+        error: {type: string, description: 可选稳定错误码，不包含原始子进程输出、URL 凭据或上游正文}
+        authenticated: {type: boolean}
+        protocol_version: {type: string}
+        tools: {type: array, items: {type: object, additionalProperties: true}, description: MCP tools/list 目录，不在此 API 中执行工具}
+        resources: {type: array, items: {type: object, additionalProperties: true}}
+        resource_templates: {type: array, items: {type: object, additionalProperties: true}}
+        prompts: {type: array, items: {type: object, additionalProperties: true}}
+    MCPAuthResult:
+      type: object
+      required: [authorization_url, status]
+      properties:
+        authorization_url: {type: string, format: uri, description: 仅用于显式打开授权页面，不包含客户端密钥或访问/刷新 token，不写日志}
+        status: {type: string}
+    ResourceOpener:
+      type: object
+      required: [id, kind, name, available]
+      properties:
+        id: {type: string}
+        kind: {type: string, enum: [file_manager, terminal, ide]}
+        name: {type: string}
+        available: {type: boolean}
+    ResourceOpeners:
+      type: object
+      required: [platform, items]
+      properties:
+        platform: {type: string, enum: [darwin, windows, linux]}
+        items: {type: array, items: {$ref: "#/components/schemas/ResourceOpener"}}
+    DiagnosticStep:
+      type: object
+      required: [id, label, status, message]
+      properties:
+        id: {type: string}
+        label: {type: string}
+        status: {type: string, enum: [success, failed, warning, skipped]}
+        message: {type: string}
+        detail: {type: string}
+        duration_ms: {type: integer, format: int64, minimum: 0}
+    ProviderDiagnostic:
+      type: object
+      required: [provider, available, authenticated, status, capability_version, started_at, finished_at, steps]
+      properties:
+        provider: {type: string, pattern: '^[a-z][a-z0-9_-]{0,63}$'}
+        provider_version: {type: string}
+        available: {type: boolean}
+        authenticated: {type: boolean}
+        status: {type: string, enum: [connected, needs_auth, unavailable]}
+        unavailable_reason_code: {type: string}
+        capabilities: {type: object, additionalProperties: true}
+        capability_version: {type: integer}
+        models: {type: array, items: {type: string}}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+        steps: {type: array, items: {$ref: "#/components/schemas/DiagnosticStep"}}
+    ProviderRuntimeRecycleResult:
+      type: object
+      additionalProperties: false
+      required: [provider, recycled_instances, active_instances, remaining_instances]
+      properties:
+        provider: {type: string, pattern: '^[a-z][a-z0-9_-]{0,63}$'}
+        recycled_instances: {type: integer, minimum: 0}
+        active_instances: {type: integer, minimum: 0}
+        remaining_instances: {type: integer, minimum: 0}
+    ModelProviderInput:
+      type: object
+      additionalProperties: false
+      required: [preset_id, base_url, model]
+      properties:
+        preset_id: {type: string, enum: [openai, anthropic, google, deepseek, dashscope, moonshot, zhipu, openrouter, custom]}
+        base_url: {type: string, maxLength: 2048, description: HTTPS API 根地址，或本机 loopback HTTP；不允许用户名、密码、查询参数或 fragment}
+        model: {type: string, minLength: 1, maxLength: 200}
+        api_key: {type: string, maxLength: 8192, writeOnly: true, description: 不回显；留空仅保留同供应商同完整端点的既有密钥}
+    ModelProviderView:
+      type: object
+      required: [preset_id, name, base_url, model, model_ref, key_configured]
+      properties:
+        preset_id: {type: string}
+        name: {type: string}
+        base_url: {type: string}
+        model: {type: string}
+        model_ref: {type: string, description: 供 Lumi/OpenCode 使用的完整 provider/model 引用}
+        key_configured: {type: boolean}
+    ProgrammingToolExecutable:
+      type: object
+      additionalProperties: false
+      required: [provider, path, resolved, source]
+      properties:
+        provider: {type: string, pattern: '^[a-z][a-z0-9_-]{0,63}$'}
+        path: {type: string, description: 用户保存的自定义可执行文件路径；空表示自动解析}
+        resolved: {type: string, description: 运行时当前实际使用的可执行文件路径或命令名}
+        source: {type: string, enum: [custom, environment, bundled, path], description: 解析来源：设置路径、环境变量、应用内置运行时或 PATH}
+    ResponseMeta:
+      type: object
+      required: [request_id]
+      properties:
+        request_id: {type: string}
+        resource_version: {type: integer, format: int64, minimum: 1}
+        replayed: {type: boolean, default: false}
+    SuccessEnvelope:
+      type: object
+      required: [data, meta]
+      properties:
+        data: {}
+        meta: {$ref: "#/components/schemas/ResponseMeta"}
+    Page:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {}}
+        next_cursor: {type: string}
+    ErrorEnvelope:
+      type: object
+      required: [error, meta]
+      properties:
+        error:
+          type: object
+          required: [code, message, retryable]
+          properties:
+            code: {type: string, examples: [version_conflict]}
+            message:
+              type: string
+              description: 至少包含英文；含中文业务说明时使用 `English / 中文` 双语格式
+              examples: ["The resource version has changed / 资源版本已变化"]
+            retryable: {type: boolean}
+            details: {type: object, additionalProperties: true}
+        meta: {$ref: "#/components/schemas/ResponseMeta"}
+    ImageContentBlock:
+      type: object
+      additionalProperties: false
+      required: [type, mime_type, filename, data_url]
+      properties:
+        type: {type: string, const: image}
+        mime_type: {type: string, enum: [image/png, image/jpeg, image/gif, image/webp]}
+        filename: {type: string, minLength: 1, maxLength: 255}
+        data_url:
+          type: string
+          pattern: '^data:image/(png|jpeg|gif|webp);base64,'
+          maxLength: 699100
+          writeOnly: true
+          description: 仅创建 Run 或 steer 时接受；Run 与事件响应不会返回原始图片数据
+    PublicContentBlock:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [type, text]
+          properties:
+            type: {type: string, const: text}
+            text: {type: string}
+            internal: {type: boolean, default: false}
+        - type: object
+          additionalProperties: false
+          required: [type, mime_type, filename]
+          properties:
+            type: {type: string, const: image}
+            mime_type: {type: string, enum: [image/png, image/jpeg, image/gif, image/webp]}
+            filename: {type: string, minLength: 1, maxLength: 255}
+    TextContentBlock:
+      type: object
+      additionalProperties: false
+      required: [type, text]
+      properties:
+        type: {type: string, const: text}
+        text: {type: string}
+        internal: {type: boolean, default: false}
+
+    Project:
+      type: object
+      additionalProperties: false
+      required: [id, version, created_at, updated_at, computer_id, name, is_default]
+      properties:
+        id: {type: string}
+        version: {type: integer, format: int64, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        deleted_at: {type: string, format: date-time}
+        computer_id: {type: string}
+        name: {type: string}
+        description: {type: string}
+        is_default:
+          type: boolean
+          readOnly: true
+          description: 是否为本机唯一内置默认项目。名称固定为“默认项目”，不可删除；按稳定 ID 而非名称识别。该项目使用真实非空 ID，支持普通项目业务。
+
+    ProjectEnvelope:
+      allOf:
+        - {$ref: "#/components/schemas/SuccessEnvelope"}
+        - type: object
+          properties:
+            data: {$ref: "#/components/schemas/Project"}
+    ProjectPageEnvelope:
+      allOf:
+        - {$ref: "#/components/schemas/SuccessEnvelope"}
+        - type: object
+          properties:
+            data:
+              type: object
+              required: [items]
+              properties:
+                items: {type: array, items: {$ref: "#/components/schemas/Project"}}
+                next_cursor: {type: string}
+    ProjectSearchResult:
+      type: object
+      additionalProperties: false
+      required: [id, kind, project_id, title, excerpt, occurred_at]
+      properties:
+        id: {type: string}
+        kind: {type: string, enum: [memory, issue_description, issue_comment, session_message]}
+        project_id: {type: string}
+        title: {type: string}
+        excerpt: {type: string, description: 有界纯文本摘要，不包含 Provider 原始 payload}
+        memory_id: {type: string}
+        issue_id: {type: string}
+        comment_id: {type: string}
+        issue_agent_instance_id: {type: string}
+        run_id: {type: string}
+        role: {type: string, enum: [user, assistant]}
+        anchor: {type: string, description: 会话内用户可见消息定位键}
+        occurred_at: {type: string, format: date-time}
+    ProjectSearchPageEnvelope:
+      allOf:
+        - {$ref: "#/components/schemas/SuccessEnvelope"}
+        - type: object
+          properties:
+            data:
+              type: object
+              required: [items, truncated]
+              properties:
+                items: {type: array, items: {$ref: "#/components/schemas/ProjectSearchResult"}}
+                truncated: {type: boolean, description: 数量或扫描预算已用尽，或存在未扫描的大内容；空 items 不代表完整历史无匹配}
+
+    Issue:
+      type: object
+      additionalProperties: false
+      required: [id, version, created_at, updated_at, project_id, title, status, worktree_hint, created_by_user_id]
+      properties:
+        id: {type: string}
+        version: {type: integer, format: int64, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        deleted_at: {type: string, format: date-time}
+        project_id: {type: string}
+        title: {type: string}
+        description: {type: string, description: 任务描述，创建后只读}
+        status: {type: string, enum: [open, resolved, closed]}
+        worktree_hint: {type: boolean}
+        created_by_user_id: {type: string}
+    Run:
+      type: object
+      additionalProperties: false
+      required: [id, version, created_at, updated_at, issue_id, project_id, status, read_only, lease_epoch, input, purpose]
+      properties:
+        id: {type: string}
+        version: {type: integer, format: int64, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        deleted_at: {type: string, format: date-time}
+        issue_id: {type: string}
+        issue_agent_instance_id: {type: string}
+        issue_agent_generation_id: {type: string}
+        agent_id: {type: string}
+        project_id: {type: string}
+        status: {type: string, enum: [queued, starting, running, waiting_approval, cancelling, succeeded, failed, cancelled, lost]}
+        agent_service_id: {type: string}
+        model: {type: string}
+        read_only: {type: boolean}
+        lease_epoch: {type: integer, format: int64, minimum: 1}
+        input: {type: array, items: {$ref: "#/components/schemas/PublicContentBlock"}, description: "仅真实用户输入与附件元数据；不返回内部控制块、Issue 拼装上下文或 mention 首条提示词。完整执行输入仍由服务端持久化。"}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+        terminal_reason: {type: string}
+        goal_id: {type: string}
+        purpose: {type: string, enum: [work, goal_continuation, goal_audit, goal_finalize, work_assistant]}
+        conversation_node_id: {type: string}
+        assistant_session_id: {type: string, description: 全局工作记录助手会话；非空时 project_id 为空且 read_only 为 true}
+    IssueEnvelope:
+      allOf:
+        - {$ref: "#/components/schemas/SuccessEnvelope"}
+        - type: object
+          properties:
+            data: {$ref: "#/components/schemas/Issue"}
+    ConversationGraph:
+      type: object
+      required: [id, version, project_id, computer_id, title, node_count, created_at, updated_at]
+      properties:
+        id: {type: string}
+        version: {type: integer, format: int64}
+        project_id: {type: string}
+        computer_id: {type: string}
+        title: {type: string}
+        node_count: {type: integer, minimum: 0}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    ConversationNode:
+      type: object
+      required: [id, version, graph_id, agent_id, title, status, position_x, position_y, width, height, locked, message_count, created_at, updated_at]
+      properties:
+        id: {type: string}
+        version: {type: integer, format: int64}
+        graph_id: {type: string}
+        parent_id: {type: string}
+        fork_message_id: {type: string}
+        agent_id: {type: string}
+        agent_revision_id: {type: string}
+        title: {type: string}
+        status: {type: string, enum: [idle, running, paused, failed]}
+        position_x: {type: number}
+        position_y: {type: number}
+        width: {type: number, minimum: 300, maximum: 1000}
+        height: {type: number, minimum: 260, maximum: 1600}
+        locked:
+          type: boolean
+          description: 已创建分支的历史节点；不能再发送消息，只能继续创建分支。
+        issue_id: {type: string}
+        inherited_messages:
+          type: array
+          description: 创建分支时冻结的聊天记录快照。
+          items:
+            type: object
+            required: [author, body]
+            properties:
+              author: {type: string, enum: [user, agent]}
+              body: {type: string}
+        message_count: {type: integer}
+        preview: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    ConversationMessage:
+      type: object
+      required: [id, version, node_id, author_kind, body, status, created_at, updated_at]
+      properties:
+        id: {type: string}
+        version: {type: integer, format: int64}
+        node_id: {type: string}
+        author_kind: {type: string, enum: [user, agent]}
+        body: {type: string}
+        status: {type: string, enum: [working, published, failed]}
+        run_id: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    ConversationGraphDetail:
+      type: object
+      required: [graph, nodes, messages, goals]
+      properties:
+        graph: {$ref: "#/components/schemas/ConversationGraph"}
+        nodes: {type: array, items: {$ref: "#/components/schemas/ConversationNode"}}
+        messages: {type: array, items: {$ref: "#/components/schemas/ConversationMessage"}}
+        goals: {type: array, items: {$ref: "#/components/schemas/ConversationGoal"}}
+    ConversationGoal:
+      type: object
+      required: [id, version, node_id, agent_revision_id, objective, status, phase, token_budget, tokens_used, work_runs, run_count, max_work_runs, note, status_reason, created_at, updated_at]
+      properties:
+        id: {type: string}
+        version: {type: integer, format: int64}
+        node_id: {type: string}
+        agent_revision_id: {type: string}
+        objective: {type: string}
+        status: {type: string, enum: [active, paused, blocked, budget_reached, completed, cancelled]}
+        phase: {type: string, enum: [running, evaluating, settled]}
+        token_budget: {type: [integer, "null"]}
+        tokens_used: {type: integer, format: int64}
+        work_runs: {type: integer}
+        run_count: {type: integer}
+        max_work_runs: {type: integer}
+        current_run_id: {type: string}
+        last_work_run_id: {type: string}
+        note: {type: string}
+        status_reason: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    CreateConversationGraphRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        title: {type: string, maxLength: 200}
+        agent_id: {type: string}
+        node_title: {type: string, maxLength: 200}
+    UpdateConversationGraphRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version, title]
+      properties:
+        expected_version: {type: integer, format: int64, minimum: 1}
+        title: {type: string, minLength: 1, maxLength: 200}
+    InitializeConversationGraphRootRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version, agent_id]
+      properties:
+        expected_version: {type: integer, format: int64, minimum: 1}
+        agent_id: {type: string, minLength: 1}
+    UpdateConversationNodeRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version]
+      properties:
+        expected_version: {type: integer, format: int64, minimum: 1}
+        title: {type: string, maxLength: 200}
+        agent_id: {type: string, minLength: 1}
+        position_x: {type: number, minimum: -1000000, maximum: 1000000}
+        position_y: {type: number, minimum: -1000000, maximum: 1000000}
+        width: {type: number, minimum: 300, maximum: 1000}
+        height: {type: number, minimum: 260, maximum: 1600}
+    ForkConversationNodeRequest:
+      type: object
+      additionalProperties: false
+      required: [message_id]
+      properties:
+        message_id: {type: string}
+        agent_id: {type: string}
+        title: {type: string, maxLength: 200}
+    CreateConversationMessageRequest:
+      type: object
+      additionalProperties: false
+      required: [body]
+      properties:
+        body: {type: string, minLength: 1, maxLength: 20000}
+        expected_agent_id: {type: string, minLength: 1}
+        expected_agent_revision_id: {type: string, minLength: 1}
+    ConversationGraphEnvelope:
+      allOf:
+        - {$ref: "#/components/schemas/SuccessEnvelope"}
+        - type: object
+          properties:
+            data: {$ref: "#/components/schemas/ConversationGraph"}
+    ConversationGraphPageEnvelope:
+      allOf:
+        - {$ref: "#/components/schemas/SuccessEnvelope"}
+        - type: object
+          properties:
+            data:
+              type: object
+              required: [items]
+              properties:
+                items: {type: array, items: {$ref: "#/components/schemas/ConversationGraph"}}
+    ConversationGraphDetailEnvelope:
+      allOf:
+        - {$ref: "#/components/schemas/SuccessEnvelope"}
+        - type: object
+          properties:
+            data: {$ref: "#/components/schemas/ConversationGraphDetail"}
+    ConversationNodeEnvelope:
+      allOf:
+        - {$ref: "#/components/schemas/SuccessEnvelope"}
+        - type: object
+          properties:
+            data: {$ref: "#/components/schemas/ConversationNode"}
+    ConversationMessagePageEnvelope:
+      allOf:
+        - {$ref: "#/components/schemas/SuccessEnvelope"}
+        - type: object
+          properties:
+            data:
+              type: object
+              required: [items]
+              properties:
+                items: {type: array, items: {$ref: "#/components/schemas/ConversationMessage"}}
+    ConversationMessageEnvelope:
+      allOf:
+        - {$ref: "#/components/schemas/SuccessEnvelope"}
+        - type: object
+          properties:
+            data: {$ref: "#/components/schemas/ConversationMessage"}
+    IssuePageEnvelope:
+      allOf:
+        - {$ref: "#/components/schemas/SuccessEnvelope"}
+        - type: object
+          properties:
+            data:
+              type: object
+              required: [items]
+              properties:
+                items: {type: array, items: {$ref: "#/components/schemas/Issue"}}
+                next_cursor: {type: string}
+                total: {type: integer, minimum: 0, description: 使用分页或过滤参数时返回，表示过滤后的项目任务总数。}
+    RunEnvelope:
+      allOf:
+        - {$ref: "#/components/schemas/SuccessEnvelope"}
+        - type: object
+          properties:
+            data: {$ref: "#/components/schemas/Run"}
+    RunPageEnvelope:
+      allOf:
+        - {$ref: "#/components/schemas/SuccessEnvelope"}
+        - type: object
+          properties:
+            data:
+              type: object
+              required: [items]
+              properties:
+                items: {type: array, items: {$ref: "#/components/schemas/Run"}}
+                next_cursor: {type: string}
+    ScheduledTask:
+      type: object
+      additionalProperties: false
+      description: |
+        陈旧 cron occurrence 处理一次后从当前时间计算下一次，不逐分钟补跑；同一 task 每个
+        scheduler tick 最多 catch-up 一次。dispatch 失败持久化指数退避，永久配置错误会暂停任务。
+        新建 HTTP 任务默认 issue_mode=new，每次原子创建 Issue、用户提示评论、结构化 mention 与队列 Run；
+        existing 仅复用本项目 open Issue，已结束、删除或有暂停会话时拒绝并暂停自动调度，不自动重开。
+        旧数据库中无配置 profile 的任务省略 issue_mode，保留原 standalone Run 行为；编辑可显式选择新模式。
+        扩展配置与核心记录同事务写入 app_metadata，不修改数据库基线；配置缺失或损坏时拒绝执行。
+        daily/weekly 按 IANA 本地时分对计算，DST 缺失分钟跳过、重复分钟各触发一次，预览与执行共用算法。
+      required: [id, version, created_at, updated_at, project_id, name, enabled, schedule_kind, schedule_expression, timezone, prompt, concurrency_policy, misfire_policy, dispatch_attempts]
+      properties:
+        id: {type: string}
+        version: {type: integer, format: int64, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        deleted_at: {type: string, format: date-time}
+        project_id: {type: string}
+        name: {type: string}
+        enabled: {type: boolean}
+        schedule_kind: {type: string, enum: [daily, weekly, once, cron]}
+        schedule_expression: {type: string, description: "once 使用 RFC3339 绝对时间；cron 使用五字段；daily/weekly 返回空字符串"}
+        times: {$ref: "#/components/schemas/ScheduleTimes"}
+        weekdays: {$ref: "#/components/schemas/ScheduleWeekdays"}
+        issue_mode: {type: string, enum: [new, existing]}
+        issue_id: {type: string, description: "existing 模式的本项目目标 Issue"}
+        timezone: {type: string}
+        prompt: {type: array, items: {$ref: "#/components/schemas/TextContentBlock"}}
+        agent_id: {type: string}
+        concurrency_policy: {type: string, enum: [forbid, allow]}
+        misfire_policy: {type: string, enum: [skip, run_once]}
+        next_run_at: {type: string, format: date-time}
+        dispatch_attempts: {type: integer, minimum: 0}
+        dispatch_retry_at: {type: string, format: date-time}
+        last_dispatch_error: {type: string, maxLength: 128, description: 有界错误代码，不包含 Provider 输出、路径或凭据}
+    ScheduledTaskRun:
+      type: object
+      additionalProperties: false
+      description: "触发记录、Issue/用户评论/mention、queued Run 在同一事务提交；相同触发键只产生一次副作用；Issue 模式通过 issue_id 链接真实运行任务"
+      required: [id, scheduled_task_id, trigger_key, scheduled_for, status, created_at, dispatch_attempts]
+      properties:
+        id: {type: string}
+        scheduled_task_id: {type: string}
+        run_id: {type: string}
+        issue_id: {type: string, description: "Run 关联 Issue；旧 standalone 与跳过记录不提供"}
+        trigger_key: {type: string}
+        scheduled_for: {type: string, format: date-time}
+        status: {type: string, enum: [pending, running, succeeded, failed, cancelled, lost, skipped_misfire, skipped_concurrency]}
+        created_at: {type: string, format: date-time}
+        dispatch_attempts: {type: integer, minimum: 0}
+        retry_at: {type: string, format: date-time}
+        last_error: {type: string, maxLength: 128, description: occurrence 的有界 dispatch 错误代码}
+    ScheduledTaskEnvelope:
+      allOf:
+        - {$ref: "#/components/schemas/SuccessEnvelope"}
+        - type: object
+          properties:
+            data: {$ref: "#/components/schemas/ScheduledTask"}
+    ScheduledTaskPageEnvelope:
+      allOf:
+        - {$ref: "#/components/schemas/SuccessEnvelope"}
+        - type: object
+          properties:
+            data:
+              type: object
+              required: [items]
+              properties:
+                items: {type: array, items: {$ref: "#/components/schemas/ScheduledTask"}}
+                next_cursor: {type: string}
+    ScheduledTaskRunEnvelope:
+      allOf:
+        - {$ref: "#/components/schemas/SuccessEnvelope"}
+        - type: object
+          properties:
+            data: {$ref: "#/components/schemas/ScheduledTaskRun"}
+    ScheduledTaskRunPageEnvelope:
+      allOf:
+        - {$ref: "#/components/schemas/SuccessEnvelope"}
+        - type: object
+          properties:
+            data:
+              type: object
+              required: [items]
+              properties:
+                items: {type: array, items: {$ref: "#/components/schemas/ScheduledTaskRun"}}
+                next_cursor: {type: string}
+    RunEvent:
+      type: object
+      additionalProperties: false
+      description: 紧凑 JSON wire 完整编码后硬上限 8 MiB；payload 紧凑编码上限为 8 MiB 减 64 KiB。HTTP 列表与 SSE 对内部 user.steer 和原生用户输入回显仅保留 internal=true 元数据，不返回正文，原事件身份和 seq 不变以支持分页与重放；持久化事件不变。
+      required: [id, run_id, seq, event_type, payload, occurred_at]
+      properties:
+        id: {type: string}
+        run_id: {type: string}
+        seq: {type: integer, format: int64, minimum: 1}
+        event_type: {type: string}
+        payload: {type: object, additionalProperties: true}
+        occurred_at: {type: string, format: date-time}
+    RunEventPageEnvelope:
+      allOf:
+        - {$ref: "#/components/schemas/SuccessEnvelope"}
+        - type: object
+          properties:
+            data:
+              type: object
+              required: [items, truncated]
+              properties:
+                items: {type: array, items: {$ref: "#/components/schemas/RunEvent"}}
+                next_cursor: {type: string, description: 最后一个已返回事件的十进制 seq}
+                truncated: {type: boolean, description: 达到条数或累计紧凑 payload wire 字节预算时为 true}
+    GitRepositoryWarning:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: UI 本地化必须使用的稳定代码
+          enum:
+            - discovery_limit_exceeded
+            - status_unavailable
+            - watch_limit_exceeded
+            - stats_unavailable
+            - status_output_truncated
+            - changes_truncated
+            - status_truncated
+            - path_limit_exceeded
+            - patch_truncated
+            - snapshot_payload_truncated
+            - snapshot_incomplete
+            - snapshot_capture_failed
+            - snapshot_save_failed
+        message:
+          type: string
+          description: 不含本机路径的安全英文 fallback；UI 不应将其作为本地化主键
+    GitRepositoryBranch:
+      type: object
+      additionalProperties: false
+      required: [detached, unborn, ahead, behind]
+      properties:
+        name: {type: string}
+        oid: {type: string}
+        detached: {type: boolean}
+        unborn: {type: boolean}
+        upstream: {type: string}
+        ahead: {type: integer}
+        behind: {type: integer}
+    GitRepositorySummary:
+      type: object
+      additionalProperties: false
+      required: [id, common_id, label, root_display, resource_ids, discovery_origin, worktree_kind, worktree, scope, branch, operation, generation, state, counts, warnings]
+      properties:
+        id: {type: string, description: 基于 canonical repository identity 的稳定 SHA-256 身份，不暴露路径}
+        common_id: {type: string, description: 共享 Git common directory 的稳定 SHA-256 身份}
+        label: {type: string, description: 安全数据 label；不拼接本地化 scope/suffix，UI 根据 scope 本地化}
+        root_display: {type: string, description: 安全显示路径；绝不包含本机绝对路径，也不拼接本地化 scope/suffix}
+        resource_ids: {type: array, items: {type: string}}
+        discovery_origin: {type: string, enum: [resource, nested, ancestor]}
+        origin: {type: string}
+        worktree_kind: {type: string, enum: [main, linked, submodule]}
+        worktree:
+          type: object
+          required: [linked, main]
+          properties:
+            linked: {type: boolean}
+            main: {type: boolean}
+        scope:
+          type: string
+          enum: [full, resource_prefix]
+          description: full 授权完整仓库根；resource_prefix 仅授权已注册资源的精确根，可由 Provider 安全读写
+        branch: {$ref: "#/components/schemas/GitRepositoryBranch"}
+        operation:
+          type: object
+          properties:
+            kind: {type: string}
+        generation: {type: integer, format: int64}
+        state: {type: string, enum: [unknown, clean, dirty, conflicted, unavailable]}
+        counts:
+          type: object
+          required: [conflict, staged, unstaged, untracked]
+          properties:
+            conflict: {type: integer, minimum: 0}
+            staged: {type: integer, minimum: 0}
+            unstaged: {type: integer, minimum: 0}
+            untracked: {type: integer, minimum: 0}
+        warnings:
+          type: array
+          items: {$ref: "#/components/schemas/GitRepositoryWarning"}
+    GitRepositoryList:
+      type: object
+      additionalProperties: false
+      required: [snapshot_id, repositories, truncated, warnings]
+      properties:
+        snapshot_id: {type: string, description: Runtime 实例内 HMAC 快照身份，不可跨实例复用}
+        repositories: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/GitRepositorySummary"}}
+        truncated: {type: boolean}
+        warnings:
+          type: array
+          items: {$ref: "#/components/schemas/GitRepositoryWarning"}
+    GitRepositoryListEnvelope:
+      allOf:
+        - {$ref: "#/components/schemas/SuccessEnvelope"}
+        - type: object
+          properties:
+            data: {$ref: "#/components/schemas/GitRepositoryList"}
+    GitDisplayPath:
+      type: object
+      additionalProperties: false
+      required: [token, display]
+      properties:
+        token: {type: string, description: Runtime 生成的不透明路径令牌}
+        display: {type: string, description: 不含本机绝对根目录的安全显示路径}
+        encoding: {type: string}
+    GitDiffStats:
+      type: object
+      additionalProperties: false
+      required: [additions, deletions, binary]
+      properties:
+        additions: {type: integer, minimum: 0}
+        deletions: {type: integer, minimum: 0}
+        lines: {type: integer, minimum: 0}
+        bytes: {type: integer, format: int64, minimum: 0}
+        binary: {type: boolean}
+    GitRename:
+      type: object
+      additionalProperties: false
+      required: [from, to, similarity]
+      properties:
+        from: {type: string}
+        to: {type: string}
+        similarity: {type: integer, minimum: 0, maximum: 100}
+    GitConflict:
+      type: object
+      additionalProperties: false
+      required: [index_status, worktree_status]
+      properties:
+        index_status: {type: string}
+        worktree_status: {type: string}
+    GitSubmodule:
+      type: object
+      additionalProperties: false
+      required: [head_changed, modified_content, untracked_content]
+      properties:
+        head_changed: {type: boolean}
+        modified_content: {type: boolean}
+        untracked_content: {type: boolean}
+    GitChange:
+      type: object
+      additionalProperties: false
+      required: [id, path_id, area, status, kind, path, display_path, binary, submodule, diff_available, additions, deletions, stats]
+      properties:
+        id: {type: string, description: 当前 Git 快照内的不透明变更 ID}
+        path_id: {type: string}
+        area: {type: string, enum: [conflict, staged, unstaged, untracked]}
+        status: {type: string}
+        kind: {type: string}
+        path: {$ref: "#/components/schemas/GitDisplayPath"}
+        old_path:
+          anyOf:
+            - {$ref: "#/components/schemas/GitDisplayPath"}
+            - {type: "null"}
+        display_path: {type: string}
+        old_display_path: {type: string}
+        similarity: {type: integer, minimum: 0, maximum: 100}
+        rename:
+          anyOf:
+            - {$ref: "#/components/schemas/GitRename"}
+            - {type: "null"}
+        binary: {type: boolean}
+        conflict_code: {type: string}
+        conflict:
+          anyOf:
+            - {$ref: "#/components/schemas/GitConflict"}
+            - {type: "null"}
+        submodule:
+          anyOf:
+            - {$ref: "#/components/schemas/GitSubmodule"}
+            - {type: "null"}
+        diff_available: {type: boolean}
+        additions: {type: integer, minimum: 0}
+        deletions: {type: integer, minimum: 0}
+        stats: {$ref: "#/components/schemas/GitDiffStats"}
+    GitChangesPage:
+      type: object
+      additionalProperties: false
+      required: [snapshot_id, repository_id, repository_generation, generation, items, truncated, warnings]
+      properties:
+        snapshot_id: {type: string}
+        repository_id: {type: string}
+        repository_generation: {type: integer, format: int64}
+        generation: {type: integer, format: int64}
+        area: {type: string, enum: [conflict, staged, unstaged, untracked]}
+        items: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/GitChange"}}
+        next_cursor: {type: string}
+        truncated: {type: boolean}
+        warnings:
+          type: array
+          items: {$ref: "#/components/schemas/GitRepositoryWarning"}
+    GitChangesPageEnvelope:
+      allOf:
+        - {$ref: "#/components/schemas/SuccessEnvelope"}
+        - type: object
+          properties:
+            data: {$ref: "#/components/schemas/GitChangesPage"}
+    GitDiffTruncation:
+      type: object
+      additionalProperties: false
+      required: [truncated, reason]
+      properties:
+        truncated: {type: boolean}
+        reason:
+          type: string
+          description: 稳定截断代码；UI 必须按代码本地化
+          enum: [patch_limit, timeout, response_budget]
+        limit_bytes: {type: integer, format: int64, minimum: 0}
+    GitDiffImage:
+      type: object
+      additionalProperties: false
+      required: [mime_type, data_url, size_bytes]
+      properties:
+        mime_type: {type: string}
+        data_url: {type: string}
+        size_bytes: {type: integer, format: int64, minimum: 0}
+    GitDiffImages:
+      type: object
+      additionalProperties: false
+      properties:
+        before: {$ref: "#/components/schemas/GitDiffImage"}
+        after: {$ref: "#/components/schemas/GitDiffImage"}
+    GitDiffResult:
+      type: object
+      additionalProperties: false
+      required: [snapshot_id, repository_id, change_id, generation, comparison, kind, path, stats, truncated, confirm_required]
+      properties:
+        snapshot_id: {type: string}
+        repository_id: {type: string}
+        change_id: {type: string}
+        generation: {type: integer, format: int64}
+        comparison: {type: string}
+        kind: {type: string}
+        path: {$ref: "#/components/schemas/GitDisplayPath"}
+        old_path:
+          anyOf:
+            - {$ref: "#/components/schemas/GitDisplayPath"}
+            - {type: "null"}
+        language: {type: string}
+        stats: {$ref: "#/components/schemas/GitDiffStats"}
+        patch: {type: string}
+        truncated: {type: boolean}
+        truncation:
+          anyOf:
+            - {$ref: "#/components/schemas/GitDiffTruncation"}
+            - {type: "null"}
+        confirm_required: {type: boolean}
+        message_code:
+          type: string
+          description: v5 可选稳定消息代码；存在时 UI 必须按此字段本地化，message 仅为英文 fallback
+          enum:
+            - untracked_directory_expand_required
+            - untracked_symlink_summary
+            - diff_confirmation_required
+            - diff_line_confirmation_required
+            - diff_patch_limit
+            - diff_timeout
+            - image_confirmation_required
+            - response_budget
+        message: {type: string, description: 不含本机路径的安全英文 fallback；UI 应优先使用 message_code}
+        images:
+          anyOf:
+            - {$ref: "#/components/schemas/GitDiffImages"}
+            - {type: "null"}
+    GitDiffResultEnvelope:
+      allOf:
+        - {$ref: "#/components/schemas/SuccessEnvelope"}
+        - type: object
+          properties:
+            data: {$ref: "#/components/schemas/GitDiffResult"}
+    GitRunPatchArea:
+      type: object
+      additionalProperties: false
+      required: [area, paths, binary_paths, truncated]
+      properties:
+        area: {type: string, enum: [conflict, staged, unstaged]}
+        patch:
+          type: string
+          description: 仓库相对路径的 aggregate unified patch；二进制只含 Git 元数据，不含 binary patch body
+          maxLength: 8388608
+        paths: {type: array, maxItems: 10000, items: {type: string, maxLength: 4096}}
+        binary_paths: {type: array, maxItems: 10000, items: {type: string, maxLength: 4096}}
+        truncated: {type: boolean}
+    GitRunUntrackedEntry:
+      type: object
+      additionalProperties: false
+      required: [path, kind]
+      properties:
+        path: {type: string, maxLength: 4096, description: 安全仓库相对显示路径}
+        kind: {type: string, enum: [file, symlink, directory, submodule]}
+        size_bytes: {type: integer, format: int64, minimum: 0}
+    GitRunWorkspaceSnapshot:
+      type: object
+      additionalProperties: false
+      required: [repository_id, label, root_display, phase, captured_at, areas, untracked, warnings, truncated, content_hash]
+      description: Git 工作区在 Run 边界的观察；不是 Agent 独占修改证明
+      properties:
+        repository_id: {type: string, description: 稳定不可逆仓库 ID}
+        label: {type: string}
+        root_display: {type: string, description: 安全 label/相对显示，永不包含仓库绝对路径}
+        phase: {type: string, enum: [start, end]}
+        captured_at: {type: string, format: date-time}
+        areas: {type: array, items: {$ref: "#/components/schemas/GitRunPatchArea"}}
+        untracked: {type: array, maxItems: 10000, items: {$ref: "#/components/schemas/GitRunUntrackedEntry"}}
+        warnings:
+          type: array
+          items: {$ref: "#/components/schemas/GitRepositoryWarning"}
+        truncated: {type: boolean}
+        content_hash: {type: string, pattern: "^[0-9a-f]{64}$"}
+    GitProviderChangeReport:
+      type: object
+      additionalProperties: false
+      required: [id, seq, occurred_at, source, paths, paths_verified, scope, truncated]
+      description: Provider 明确报告的文件变化；UI 必须标为 Agent 报告
+      properties:
+        id: {type: string}
+        seq: {type: integer, format: int64, minimum: 1}
+        occurred_at: {type: string, format: date-time}
+        source: {type: string, description: '标准事件类型或 Provider 自己声明的原生变更来源。'}
+        provider_turn_id: {type: string, maxLength: 256}
+        patch: {type: string, maxLength: 8388608}
+        paths: {type: array, maxItems: 10000, items: {type: string, maxLength: 4096}}
+        paths_verified:
+          type: boolean
+          description: true 仅表示本报告返回的路径全部通过安全仓库相对路径校验
+        scope:
+          type: string
+          enum: [repository, unverified]
+          description: unverified 路径只能显示，绝不能归入 Run 仓库或参与文件操作
+        status: {type: string, maxLength: 256}
+        truncated: {type: boolean}
+    GitRunChangesResult:
+      type: object
+      additionalProperties: false
+      required: [run_id, snapshots, provider_reports, provider_reports_truncated]
+      properties:
+        run_id: {type: string}
+        snapshots:
+          type: array
+          maxItems: 200
+          description: 项目工作区中每个已发现仓库的 start/end 观察；总响应仍受统一字节和路径预算约束
+          items: {$ref: "#/components/schemas/GitRunWorkspaceSnapshot"}
+        provider_reports: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/GitProviderChangeReport"}}
+        provider_reports_truncated:
+          type: boolean
+          description: 达到报告、整个响应字节预算或 5000 个扫描事件上限时为 true
+        next_provider_cursor:
+          type: string
+          description: 截断时已安全扫描到的十进制 Run event sequence；可能跨过不产生报告的事件，客户端应原样用于下一页
+    GitRunChangesEnvelope:
+      allOf:
+        - {$ref: "#/components/schemas/SuccessEnvelope"}
+        - type: object
+          properties:
+            data: {$ref: "#/components/schemas/GitRunChangesResult"}
+
+    Appearance:
+      type: object
+      additionalProperties: false
+      required: [palette]
+      properties:
+        palette:
+          type: string
+          enum: [default, hallmark, chamber, flexoki, ocean, forest, iris]
+          default: default
+          description: 全局配色；default 为默认主题，提供浅色纯白背景与黑色强调及对应深色版本。已存储的旧 project 值只读投影为 default，不改写元数据或版本；请求不接受 project。
+        accent: {type: string, pattern: '^$|^#[0-9A-Fa-f]{6}$', description: 空字符串或省略时使用配色默认强调色}
+        background: {type: string, pattern: '^$|^#[0-9A-Fa-f]{6}$', description: 空字符串或省略时使用配色默认背景色}
+        control: {type: string, pattern: '^$|^#[0-9A-Fa-f]{6}$', description: 空字符串或省略时使用配色默认控件色；独立于背景色和强调色}
+    UserPreferences:
+      type: object
+      additionalProperties: false
+      required: [user_id, locale, locale_explicit, theme, allow_write, appearance, version]
+      properties:
+        user_id: {type: string}
+        locale: {type: string, enum: [zh-CN, zh-TW, en-US, ja-JP, de-DE, fr-FR, es-ES, pt-BR, ru-RU]}
+        locale_explicit: {type: boolean, description: 是否由用户主动选择；false 时客户端跟随操作系统语言}
+        theme: {type: string, enum: [system, light, dark]}
+        allow_write: {type: boolean}
+        appearance: {$ref: "#/components/schemas/Appearance"}
+        version: {type: integer, format: int64, minimum: 1}
+    UpdateUserPreferencesRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version]
+      properties:
+        expected_version: {type: integer, format: int64, minimum: 1}
+        locale: {type: string, enum: [zh-CN, zh-TW, en-US, ja-JP, de-DE, fr-FR, es-ES, pt-BR, ru-RU]}
+        theme: {type: string, enum: [system, light, dark]}
+        allow_write: {type: boolean}
+        appearance:
+          allOf:
+            - {$ref: "#/components/schemas/Appearance"}
+          description: 整对象替换（不合并颜色字段）；省略时保留已保存外观。与其他设置共用 expected_version 并原子提交。
+
+    Inspiration:
+      type: object
+      additionalProperties: false
+      required: [id, version, created_at, updated_at, project_id, title, markdown, completed, completed_at]
+      properties:
+        id: {type: string}
+        version: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        deleted_at: {type: string, format: date-time}
+        project_id: {type: string}
+        title: {type: string}
+        markdown: {type: string, description: 唯一正文格式；Markdown 字符串，不是 HTML 或编辑器 JSON}
+        completed: {type: boolean}
+        completed_at: {type: [string, 'null'], format: date-time}
+    InspirationQuery:
+      type: object
+      additionalProperties: false
+      properties:
+        project_id: {type: string}
+        search: {type: string, maxLength: 500}
+        status: {type: string, enum: [all, open, completed]}
+        offset: {type: integer, minimum: 0, maximum: 1000000}
+        limit: {type: integer, minimum: 0, maximum: 100}
+    WorkLocation:
+      type: object
+      additionalProperties: false
+      properties:
+        project_id: {type: string, maxLength: 128}
+        issue_id: {type: string, maxLength: 128}
+        graph_id: {type: string, maxLength: 128}
+        node_id: {type: string, maxLength: 128}
+    WorkCondition:
+      type: object
+      additionalProperties: false
+      description: 条件组只使用 join 和 conditions；单个条件使用 field/operator/value。不得混合两种结构。值为空可匹配空字段，所有值均以 SQL 参数绑定。
+      properties:
+        join: {type: string, enum: [and, or]}
+        conditions: {type: array, maxItems: 60, items: {$ref: '#/components/schemas/WorkCondition'}}
+        field: {type: string, description: 服务端白名单字段，不接受 SQL 表达式}
+        operator: {type: string, enum: [eq, ne, contains, not_contains]}
+        value: {type: string, maxLength: 500}
+    WorkQuery:
+      type: object
+      additionalProperties: false
+      properties:
+        search: {type: string, maxLength: 500}
+        from: {type: string, format: date-time}
+        until: {type: string, format: date-time}
+        filter: {$ref: '#/components/schemas/WorkCondition'}
+        include_changes: {type: boolean, default: false}
+        offset: {type: integer, minimum: 0, maximum: 1000000}
+        limit: {type: integer, minimum: 0, maximum: 200, default: 50}
+    WorkRecord:
+      type: object
+      description: 不存正文、提示词、认证凭据或任意请求快照；正常名称、路径和标识不打码。before/after/refs 为字段白名单元数据。对象删除不会级联删除记录。
+      properties:
+        id: {type: string}
+        kind: {type: string, enum: [operation, change, navigation]}
+        action: {type: string}
+        actor_type: {type: string}
+        actor_id: {type: string}
+        object_type: {type: string}
+        object_id: {type: string}
+        object_version: {type: integer}
+        title: {type: string}
+        project_id: {type: string}
+        run_id: {type: string}
+        parent_id: {type: string}
+        request_id: {type: string}
+        client_id: {type: string}
+        page_id: {type: string}
+        entry_type: {type: string}
+        sequence: {type: integer}
+        outcome: {type: string}
+        occurred_at: {type: string, format: date-time}
+        received_at: {type: string, format: date-time}
+        finished_at: {type: string}
+        refs: {type: object, additionalProperties: true}
+        before: {type: object, additionalProperties: true}
+        after: {type: object, additionalProperties: true}
+        error_code: {type: string}
+    UpdateNetworkAccessRequest:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled: {type: boolean}
+        password: {type: string, format: password, writeOnly: true, maxLength: 72, description: 空或省略时保留；非空至少 8 字符，最多 72 UTF-8 字节，无控制字符}
+
+    NetworkAccess:
+      type: object
+      additionalProperties: false
+      required: [external_access, external_urls, port, password_set, can_manage, listen_error]
+      properties:
+        external_access: {type: boolean, description: 当前实际是否监听外部地址}
+        external_urls: {type: array, items: {type: string, format: uri}}
+        port: {type: integer, minimum: 0, maximum: 65535, readOnly: true, description: 本机与局域网共用的唯一服务端口号，启动时选择，不能通过此设置修改}
+        password_set: {type: boolean}
+        can_manage: {type: boolean, description: 仅本机入口为 true}
+        listen_error: {type: boolean, description: 重启时端口冲突等导致监听失败；本机仍可用}
+
+    FeatureTourID:
+      type: string
+      enum: [overview, issues, conversations, resources, memories, schedules, changes]
+    FeatureTours:
+      type: object
+      additionalProperties: false
+      required: [seen]
+      properties:
+        seen:
+          type: array
+          uniqueItems: true
+          maxItems: 7
+          description: 按 overview、issues、conversations、resources、memories、schedules、changes 的固定顺序返回；未看过时是空数组而非 null
+          items: {$ref: "#/components/schemas/FeatureTourID"}
+    Onboarding:
+      type: object
+      additionalProperties: false
+      required: [dismissed, needed]
+      properties:
+        dismissed: {type: boolean, description: 已跳过或已完成引导；只持久化这一项}
+        needed: {type: boolean, description: 推导值：未跳过且没有用户 Agent 且 Lumi 未配置时为 true}
+
+    ExpectedVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version]
+      properties:
+        expected_version: {type: integer, format: int64, minimum: 1}
+    CreateProjectRequest:
+      type: object
+      additionalProperties: false
+      required: [computer_id, name]
+      properties:
+        computer_id: {type: string}
+        name: {type: string, minLength: 1}
+        description: {type: string}
+    UpdateProjectRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version]
+      properties:
+        expected_version: {type: integer, format: int64, minimum: 1}
+        name: {type: string}
+        description: {type: string}
+    ProjectResourceRequest:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      allOf:
+        - if:
+            properties:
+              kind: {const: url}
+          then:
+            required: [url]
+            properties:
+              url: {type: string, format: uri}
+          else:
+            required: [name, path]
+            properties:
+              name: {type: string, minLength: 1, pattern: '\S'}
+              path: {type: string}
+      properties:
+        kind: {type: string, enum: [code_directory, document_directory, url]}
+        name:
+          type: string
+          description: 手填时去除首尾空白并保留内容，最多 200 个 Unicode 字符。目录资源必须填写；网址资源可省略、留空或仅填空白，此时在项目所有权验证后尽力读取 HTML title，规范化实体及空白并截断为 200 字符。读取失败或安全策略禁止出站时使用去掉 query、fragment 的网址（同样截断），不阻断创建；不会异步覆盖手填名称。
+        path: {type: string, description: 本地目录的绝对路径}
+        url: {type: string, format: uri, description: 不含用户凭据的 HTTP(S) 地址。内网网址可注册但不自动读取名称；资源地址保留原始 query 和 fragment。}
+    UpdateResourceRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version]
+      properties:
+        expected_version: {type: integer, format: int64, minimum: 1}
+        name: {type: string}
+    CreateAgentRequest:
+      type: object
+      additionalProperties: false
+      required: [agent_service_id, name]
+      properties:
+        agent_service_id: {type: string, description: 本机探测的 AgentService}
+        model: {type: string, description: 固定模型（来自服务能力列表）}
+        name: {type: string, minLength: 1}
+        note: {type: string}
+        system_prompt: {type: string}
+        skill_version_ids: {type: array, items: {type: string}, description: 绑定的 Skill Package 版本}
+    InstallComputerSkillPackageRequest:
+      type: object
+      additionalProperties: false
+      required: [skill_package_id]
+      properties:
+        skill_package_id: {type: string, minLength: 1}
+    UpdateAgentRequest:
+      type: object
+      additionalProperties: false
+      description: 普通 Agent 与内置 Lumi 共用的原子配置更新；Provider 必须属于同一电脑。Lumi 保留不可删除及保持启用的身份保护，不能禁用；除此之外其配置和普通 Issue/定时任务运行能力与普通 Agent 一致。
+      required: [expected_version]
+      properties:
+        expected_version: {type: integer, format: int64, minimum: 1}
+        agent_service_id: {type: string, description: 可选，变更到同一电脑的 Coding Agent 服务并生成新修订}
+        name: {type: string}
+        note: {type: string}
+        status: {type: string, enum: [active, disabled]}
+        model: {type: string, maxLength: 500}
+        system_prompt: {type: string}
+        skill_version_ids: {type: array, items: {type: string}}
+    CreateIssueRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        title:
+          type: string
+          description: 任务标题，可为空；空标题在界面上显示为「未命名任务」。
+        description: {type: string, description: 可在创建时填写，创建后只读}
+        status: {type: string, enum: [open, resolved, closed]}
+        worktree_hint:
+          type: boolean
+          default: false
+          description: 勾选后向 Agent 注入「必要时创建 Git Worktree 并汇报路径」提示；平台不创建 worktree。
+    UpdateIssueRequest:
+      type: object
+      additionalProperties: false
+      description: 仅更新标题、状态和 worktree 提示；description 创建后只读，传入该字段（包括 null）会拒绝整个请求。
+      required: [expected_version]
+      properties:
+        expected_version: {type: integer, format: int64, minimum: 1}
+        title: {type: string}
+        status: {type: string, enum: [open, resolved, closed]}
+        worktree_hint: {type: boolean}
+    CreateIssueCommentRequest:
+      type: object
+      additionalProperties: false
+      description: 仅创建当前用户的评论；不接受 Agent 作者或 Run 字段。Agent 公共总结必须通过当前有效 Run 的 ToolService 发布。普通评论 body 必填非空；work_items 非空时可省略正文。
+      oneOf:
+        - required: [body]
+          properties:
+            body: {type: string, minLength: 1, pattern: '\S'}
+            work_items: {type: array, maxItems: 0}
+        - required: [work_items]
+          properties:
+            work_items: {type: array, minItems: 1}
+            mentioned_agent_ids: {type: array, maxItems: 0}
+      properties:
+        body: {type: string}
+        author_kind: {type: string, enum: [user], default: user, description: 可省略；作者始终绑定当前已登录用户，不允许 Agent 作者}
+        mentioned_agent_ids:
+          type: array
+          maxItems: 1
+          uniqueItems: true
+          items: {type: string}
+          description: 普通用户结构化 @，最多一个；不得与 work_items 同时提交
+        work_items:
+          type: array
+          maxItems: 32
+          items: {$ref: "#/components/schemas/IssueWorkItemInput"}
+          description: 每项一个独立会话，允许重复 agent_id；确认后的清单是唯一执行依据。工作清单的 JSON 编码总量不超过 128 KiB。
+    IssueWorkItemInput:
+      type: object
+      additionalProperties: false
+      required: [key, agent_id, title]
+      properties:
+        key: {type: string, minLength: 1, description: 本批次稳定单行工作标识，编辑和排序不能改变依赖身份}
+        agent_id: {type: string, minLength: 1}
+        title: {type: string, minLength: 1, maxLength: 120}
+        instruction: {type: string, description: 可选具体要求，UTF-8 字节上限 16 KiB}
+        after: {type: array, maxItems: 31, uniqueItems: true, items: {type: string}, description: 本批次工作 key，不可引用自身、缺失工作或形成等待环}
+    IssueWorkItem:
+      type: object
+      description: 工作清单的只读状态投影；执行定义不可通过编辑评论正文改变
+      properties:
+        key: {type: string}
+        agent_id: {type: string}
+        title: {type: string}
+        instruction: {type: string}
+        after: {type: array, items: {type: string}}
+        status: {type: string, description: waiting_dependencies/blocked 或对应 Run 状态，客户端须保留未知状态兜底}
+        status_reason: {type: string, description: 等待或阻塞原因，如 issue_not_open、issue_paused、result_not_published、dependency_failed、queue_cleared}
+        mention_id: {type: string}
+        run_id: {type: string}
+        issue_agent_instance_id: {type: string}
+        result_comment_id: {type: string}
+        blocked_by: {type: array, items: {type: string}}
+    IssueComment:
+      type: object
+      required: [id, version, issue_id, author_kind, body, status]
+      properties:
+        id: {type: string}
+        version: {type: integer, format: int64, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        issue_id: {type: string}
+        author_kind: {type: string, enum: [user, agent]}
+        author_user_id: {type: string}
+        author_agent_id: {type: string}
+        body: {type: string}
+        run_id: {type: string}
+        status: {type: string, enum: [working, published, failed]}
+        edited_at: {type: string, format: date-time}
+        work_items: {type: array, items: {$ref: "#/components/schemas/IssueWorkItem"}}
+    UpdateIssueCommentRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version]
+      properties:
+        expected_version: {type: integer, format: int64, minimum: 1}
+        body: {type: string}
+    CreateIssueRunRequest:
+      type: object
+      additionalProperties: false
+      required: [issue_agent_instance_id, expected_issue_version]
+      properties:
+        issue_agent_instance_id:
+          type: string
+          description: 续接当前打开的 Agent 会话
+        input: {type: string, description: sidesheet 追问或补充指令；服务端会拼入 Issue 上下文}
+        attachments:
+          type: array
+          maxItems: 4
+          items: {$ref: "#/components/schemas/ImageContentBlock"}
+          description: 仅接受公开 image 内容块；单张解码后不超过 512 KiB，总计不超过 768 KiB；持续目标和内部操作不支持附件
+        intent:
+          type: string
+          enum: [message, revise_comment]
+          default: message
+          description: revise_comment 会定位当前会话最近的已发布评论并生成精确的内部修正指令
+        internal:
+          type: boolean
+          default: false
+          description: 内部控制消息；发送给 Provider，但不作为用户消息展示在会话侧栏
+        goal:
+          type: boolean
+          default: false
+          description: 将本次非空消息作为持续目标；每轮由独立只读审核 Run 决定继续、完成或阻塞
+        goal_token_budget:
+          type: integer
+          format: int64
+          minimum: 1000
+          maximum: 100000000
+          description: 可选的工作 Agent Token 预算；仅可与 goal=true 一起使用，审核 Run 不计入预算
+        expected_issue_version: {type: integer, format: int64, minimum: 1}
+    StopRunRequest:
+      type: object
+      additionalProperties: false
+      description: 只支持显式 mode，不提供超时后自动升级停止方式的选项。
+      required: [mode]
+      properties:
+        mode: {type: string, enum: [graceful, force]}
+    CreateMemoryRequest:
+      type: object
+      additionalProperties: false
+      description: 省略或留空标题时使用新记忆，并在首份正文持久化后异步由 Lumi 命名；显式标题作为用户标题保留。
+      required: [key, kind, content]
+      properties:
+        key: {type: string}
+        kind: {type: string}
+        title: {type: string}
+        content: {type: string}
+        source_type: {type: string}
+        source_ref: {type: string}
+    UpdateMemoryRequest:
+      type: object
+      additionalProperties: false
+      description: 省略 title 保留当前标题；显式携带 title（包括同值）撤销自动命名写入权。正文版本与标题变更均保留真实版本历史。
+      required: [expected_version, content]
+      properties:
+        expected_version: {type: integer, format: int64, minimum: 1}
+        title: {type: string}
+        content: {type: string}
+    ApprovalDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version, action_digest, decision]
+      properties:
+        expected_version: {type: integer, format: int64, minimum: 1}
+        action_digest: {type: string}
+        decision: {type: string, enum: [approved, denied]}
+        scope:
+          type: string
+          enum: [once, session]
+          default: once
+          description: session 仅传递给当前 Provider 原生会话；项目级长期授权必须通过策略规则显式创建。
+    PolicyRuleRequest:
+      type: object
+      additionalProperties: false
+      required: [action_kind, effect, conditions]
+      properties:
+        action_kind: {type: string}
+        effect: {type: string, enum: [allow, deny, require_approval]}
+        conditions: {type: object, additionalProperties: true}
+        expires_at: {type: [string, "null"], format: date-time}
+    UpdatePolicyRuleRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version]
+      properties:
+        expected_version: {type: integer, format: int64, minimum: 1}
+        effect: {type: string, enum: [allow, deny, require_approval]}
+        conditions: {type: object, additionalProperties: true}
+        expires_at:
+          type: [string, "null"]
+          format: date-time
+          description: "省略保留原到期时间；null 清除到期时间；RFC3339 时间按 UTC 持久化并保留纳秒精度。"
+        enabled: {type: boolean}
+    ScheduleTimes:
+      type: array
+      minItems: 1
+      maxItems: 64
+      description: "daily/weekly 必填。本地 HH:mm 时分对；服务端去重排序，不展开时分笛卡尔积"
+      items: {type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
+    ScheduleWeekdays:
+      type: array
+      minItems: 1
+      maxItems: 7
+      description: "weekly 必填，0 为星期日、6 为星期六；服务端去重排序"
+      items: {type: integer, minimum: 0, maximum: 6}
+    ScheduledTaskRequest:
+      type: object
+      additionalProperties: false
+      description: "新建默认 issue_mode=new；existing 必须提供 issue_id，new 禁止携带 issue_id。省略或留空 name 使用新定时任务，并按首份提示词异步由 Lumi 命名；显式名称保留。提示词不能全空白。Agent 必须是本项目电脑已启用且有有效 revision 的 Agent；配置后的 Lumi 同样可以参与定时 Issue。"
+      required: [schedule_kind, timezone, prompt, agent_id]
+      properties:
+        name: {type: string}
+        schedule_kind: {type: string, enum: [daily, weekly, once, cron]}
+        schedule_expression: {type: string, description: "once 必填 RFC3339；cron 必填五字段表达式；daily/weekly 不需要"}
+        times: {$ref: "#/components/schemas/ScheduleTimes"}
+        weekdays: {$ref: "#/components/schemas/ScheduleWeekdays"}
+        issue_mode: {type: string, enum: [new, existing], default: new}
+        issue_id: {type: string}
+        timezone: {type: string, examples: [Asia/Shanghai]}
+        prompt: {type: array, minItems: 1, items: {$ref: "#/components/schemas/TextContentBlock"}}
+        agent_id: {type: string}
+        concurrency_policy: {type: string, enum: [forbid, allow]}
+        misfire_policy: {type: string, enum: [skip, run_once]}
+    UpdateScheduledTaskRequest:
+      type: object
+      additionalProperties: false
+      description: "省略 issue_mode 时保留原模式/目标，包括旧 standalone 兼容模式；暂停/恢复仅改变 enabled，不丢失扩展配置。省略 name 保留当前名称；显式 name（包括同值）作为用户改名撤销自动命名写入权。"
+      required: [schedule_kind, timezone, prompt, expected_version]
+      properties:
+        name: {type: string}
+        schedule_kind: {type: string, enum: [daily, weekly, once, cron]}
+        schedule_expression: {type: string, description: "once 必填 RFC3339；cron 必填五字段；daily/weekly 不需要"}
+        times: {$ref: "#/components/schemas/ScheduleTimes"}
+        weekdays: {$ref: "#/components/schemas/ScheduleWeekdays"}
+        issue_mode: {type: string, enum: [new, existing]}
+        issue_id: {type: string}
+        timezone: {type: string}
+        prompt: {type: array, minItems: 1, items: {$ref: "#/components/schemas/TextContentBlock"}}
+        agent_id: {type: string}
+        concurrency_policy: {type: string, enum: [forbid, allow]}
+        misfire_policy: {type: string, enum: [skip, run_once]}
+        expected_version: {type: integer, format: int64, minimum: 1}
+    SchedulePreviewRequest:
+      type: object
+      additionalProperties: false
+      required: [schedule_kind, timezone]
+      properties:
+        schedule_kind: {type: string, enum: [daily, weekly, once, cron]}
+        schedule_expression: {type: string, description: "once 必填 RFC3339 绝对时刻（预览不改变它）；cron 必填五字段；daily/weekly 不需要"}
+        times: {$ref: "#/components/schemas/ScheduleTimes"}
+        weekdays: {$ref: "#/components/schemas/ScheduleWeekdays"}
+        timezone: {type: string}
+        count: {type: integer, minimum: 1, maximum: 20, default: 5}
