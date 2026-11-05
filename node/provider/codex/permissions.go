@@ -68,14 +68,6 @@ func codexRunWritableRoots(request adapter.RunRequest, repositories []string) []
 	return roots // An explicit empty array revokes prior roots on Resume.
 }
 
-func codexRunApprovalPolicy(readOnly bool) any {
-	if readOnly {
-		return "never"
-	}
-	// Preserve native rule approvals, but never offer an unsandboxed retry or
-	// a permissions grant that bypasses the host's exact filesystem boundary.
-	return map[string]any{"granular": map[string]any{
-		"sandbox_approval": false, "rules": true, "skill_approval": true,
-		"mcp_elicitations": true, "request_permissions": false,
-	}}
-}
+// Never ask a human: Teamva runs unattended and treats the host filesystem
+// profile as the hard boundary. A blocked action fails instead of escalating.
+func codexRunApprovalPolicy() any { return "never" }

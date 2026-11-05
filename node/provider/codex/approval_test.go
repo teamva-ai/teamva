@@ -1,21 +1,19 @@
 package codex
 
 import (
-	"reflect"
 	"testing"
 
 	adapter "github.com/teamva-ai/teamva/node/provider"
 )
 
-func TestInteractiveRunPreservesRuleApprovalButCannotEscapeSandbox(t *testing.T) {
+func TestInteractiveRunNeverAsksForApproval(t *testing.T) {
 	request := adapter.RunRequest{CWD: "/tmp/project", Prompt: "run ls"}
 	for name, params := range map[string]map[string]any{
 		"thread": threadStartParams(request),
 		"turn":   turnStartParams(request, "thread-1"),
 	} {
 		t.Run(name, func(t *testing.T) {
-			want := map[string]any{"granular": map[string]any{"sandbox_approval": false, "rules": true, "skill_approval": true, "mcp_elicitations": true, "request_permissions": false}}
-			if !reflect.DeepEqual(params["approvalPolicy"], want) {
+			if params["approvalPolicy"] != "never" {
 				t.Fatalf("interactive approval policy = %v", params["approvalPolicy"])
 			}
 		})

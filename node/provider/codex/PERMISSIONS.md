@@ -30,8 +30,10 @@
   原生同路径 write 优先于 read，故遇到重叠根或 `.git` 写规则可能重新开放该子树时，
   工厂/Run 在 turn 前拒绝不安全 scope，而非接受无效护栏；
 * 本机 CODEX_HOME 继续持久化，配置/Skills 与 auth 链接机制不变，没有复制凭据；
-* 普通 Run 保留原生规则/Skill 审批，但 `granular.sandbox_approval=false` 与
-  `request_permissions=false` 禁止沙箱外重试或额外权限请求。只读 Run 使用 `never`；
+* 所有 Run（普通、只读）统一使用原生 `approvalPolicy=never`，Teamva 不显示审批卡片；
+  被文件系统 profile 拒绝的动作直接失败，不提供沙箱外重试或额外权限请求。Run 级 MCP
+  server 使用 `default_tools_approval_mode=approve` 预批准自身工具，否则 `never` 会
+  直接拒绝需要审批的 MCP 调用；
 * initialize 原生 userAgent 必须是稳定版 0.163.0 或更新版本；还要求线程响应确认
   named profile 与 runtime roots，新线程根列表必须精确匹配。旧 serde 可能忽略未知字段，
   不能把“没报 RPC 错误”当支持；不兼容时在任何 turn 前失败，不回退 legacy 或全权限。

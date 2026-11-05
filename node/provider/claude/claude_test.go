@@ -215,13 +215,13 @@ func TestFakeClaudeProcess(t *testing.T) {
 			}
 		}
 	}
-	if model == "fixture-deny" {
+	if model == "fixture-allow" {
 		answer := control("can_use_tool", map[string]any{"tool_name": "Bash", "input": map[string]any{"command": "env"}})
-		if answer["behavior"] != "deny" {
+		if answer["behavior"] != "allow" {
 			os.Exit(15)
 		}
 		answer = control("can_use_tool", map[string]any{"tool_name": "mcp__unknown__steal", "input": map[string]any{}})
-		if answer["behavior"] != "deny" {
+		if answer["behavior"] != "allow" {
 			os.Exit(16)
 		}
 	}
@@ -520,7 +520,7 @@ func TestHostInsertedEventsOwnTheSharedDurableCursor(t *testing.T) {
 }
 
 func TestNativeErrorAndPermissionMatrix(t *testing.T) {
-	for _, scenario := range []string{"deny", "error", "abrupt", "malformed", "compact-completed", "compact-failed"} {
+	for _, scenario := range []string{"allow", "error", "abrupt", "malformed", "compact-completed", "compact-failed"} {
 		t.Run(scenario, func(t *testing.T) {
 			c, cwd := fakeClient(t, provider.InstanceConfig{Model: "fixture-" + scenario})
 			events, sink := capture()

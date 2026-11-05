@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"net/http"
 	"net/url"
@@ -50,20 +49,14 @@ type Client struct {
 	writeSandbox      *writeSandbox
 	sandboxReady      bool
 
-	startMu   sync.Mutex
-	closeMu   sync.Mutex
-	runMu     sync.Mutex
-	mu        sync.Mutex
-	process   *providerprocess.Tree
-	baseURL   string
-	active    *runState
-	approvals map[string]pendingApproval
-	closed    bool
-}
-
-type pendingApproval struct {
-	runID     string
-	sessionID string
+	startMu sync.Mutex
+	closeMu sync.Mutex
+	runMu   sync.Mutex
+	mu      sync.Mutex
+	process *providerprocess.Tree
+	baseURL string
+	active  *runState
+	closed  bool
 }
 
 type runState struct {
@@ -96,7 +89,6 @@ func New(executable string) (*Client, error) {
 		password: base64.RawURLEncoding.EncodeToString(raw),
 		http: &http.Client{Timeout: 2 * time.Minute, Transport: transport,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
-		approvals: make(map[string]pendingApproval),
 	}, nil
 }
 
@@ -688,22 +680,16 @@ func (c *Client) handleEvent(ctx context.Context, state *runState, sink provider
 		if requestID == "" {
 			return nil
 		}
+		// Teamva runs unattended and never shows an approval card. A normal Run
+		// answers the native ask in the affirmative; the host permission rules
+		// still deny anything outside the Run's granted roots. Read-only and
+		// tool-disabled Runs may not escalate, so they reject the ask.
+		decision := "always"
 		if state.request.ReadOnly || state.request.DisableTools || c.disableTools {
-			// Unattended read-only runs may not escalate; reject natively and do
-			// not create an approval card that can never be accepted.
-			go c.replyPermission(context.Background(), state.session, requestID, "reject")
-			return nil
+			decision = "reject"
 		}
-		actionKind, _ := event.Data["action"].(string)
-		c.mu.Lock()
-		c.approvals[requestID] = pendingApproval{runID: state.request.RunID, sessionID: state.session}
-		c.mu.Unlock()
-		return emit("approval.requested", map[string]any{
-			"request_id":        requestID,
-			"action_kind":       actionKind,
-			"normalized_action": event.Data,
-			"risk":              "high",
-		})
+		go c.replyPermission(context.Background(), state.session, requestID, decision)
+		return nil
 	case "session.execution.succeeded":
 		return emit("run.completed", map[string]any{"status": "completed"})
 	case "session.execution.failed":
@@ -831,33 +817,9 @@ func (c *Client) replyPermission(ctx context.Context, sessionID, requestID, deci
 	)
 }
 
-func (c *Client) DecideApproval(ctx context.Context, decision provider.ApprovalDecision) error {
-	c.mu.Lock()
-	pending, ok := c.approvals[decision.RequestID]
-	if ok {
-		delete(c.approvals, decision.RequestID)
-	}
-	c.mu.Unlock()
-	if !ok || pending.runID != decision.RunID {
-		return fmt.Errorf("opencode approval %s is not pending (run %s)", decision.RequestID, decision.RunID)
-	}
-	reply := "reject"
-	if decision.Decision == "approved" {
-		reply = "once"
-		if decision.Scope == "session" || decision.Scope == "always" {
-			reply = "always"
-		}
-	}
-	decisionCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	err := c.requestJSON(decisionCtx, http.MethodPost,
-		"/api/session/"+url.PathEscape(pending.sessionID)+"/permission/"+url.PathEscape(decision.RequestID)+"/reply",
-		map[string]any{"decision": reply, "message": "Decision from Teamva control plane"}, nil,
-	)
-	if err != nil {
-		log.Printf("opencode approval reply failed request=%s session=%s decision=%s err=%v", decision.RequestID, pending.sessionID, reply, err)
-	}
-	return err
+func (c *Client) DecideApproval(context.Context, provider.ApprovalDecision) error {
+	// Native asks are answered inline; OpenCode never leaves one pending.
+	return errors.New("opencode approvals are disabled")
 }
 
 func (c *Client) Interrupt(ctx context.Context, runID string) error {

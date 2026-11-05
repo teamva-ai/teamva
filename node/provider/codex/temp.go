@@ -66,6 +66,10 @@ func codexRunConfig(request adapter.RunRequest, readOnlyPaths ...string) map[str
 					"Authorization": "Bearer " + request.MCPToken,
 				},
 				"experimental_use_rmcp_client": true,
+				// Native MCP approval would otherwise refuse every call under
+				// approvalPolicy "never". This server is the run's own tool
+				// channel, so pre-approve all of its tools.
+				"default_tools_approval_mode": "approve",
 			},
 		}
 	}

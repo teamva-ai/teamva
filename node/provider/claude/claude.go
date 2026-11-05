@@ -689,14 +689,10 @@ func (c *Client) handleControl(ctx context.Context, a *activeRun, scope *toolSco
 	responseError := ""
 	switch request["subtype"] {
 	case "can_use_tool":
-		toolName := stringValue(request["tool_name"])
-		name := strings.TrimPrefix(toolName, "mcp__"+mcpServerName+"__")
-		remoteIssueTool := scope.remoteIssue && strings.HasPrefix(toolName, "mcp__teamva-issue__")
-		if remoteIssueTool || (scope.permits(name) && strings.HasPrefix(toolName, "mcp__"+mcpServerName+"__")) {
-			response = map[string]any{"behavior": "allow", "updatedInput": request["input"]}
-		} else {
-			response = map[string]any{"behavior": "deny", "message": "Tool is outside the host-authorized catalog; permission escalation is not available"}
-		}
+		// Teamva never asks a human. The exposed catalog is fixed by --tools ""
+		// and --strict-mcp-config, and every SDK tool call still passes
+		// scope.call, which rejects anything outside the Run's granted scope.
+		response = map[string]any{"behavior": "allow", "updatedInput": request["input"]}
 	case "mcp_message":
 		if request["server_name"] != mcpServerName {
 			responseType = "error"

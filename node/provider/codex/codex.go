@@ -375,7 +375,7 @@ func threadStartParams(request adapter.RunRequest, writableRepositories ...strin
 		"cwd": request.CWD, "serviceName": "teamva",
 		"permissions":           codexPermissionProfile,
 		"runtimeWorkspaceRoots": codexRunWritableRoots(request, writableRepositories),
-		"approvalPolicy":        codexRunApprovalPolicy(request.ReadOnly),
+		"approvalPolicy":        codexRunApprovalPolicy(),
 		// Keep standalone New clients safe too. Write grants still come only
 		// from replaced runtimeWorkspaceRoots. Run config carries the confined
 		// shell temp environment; run() adds private-path read carveouts.
@@ -394,7 +394,7 @@ func turnStartParams(request adapter.RunRequest, threadID string, writableReposi
 		"cwd":                   request.CWD,
 		"permissions":           codexPermissionProfile,
 		"runtimeWorkspaceRoots": codexRunWritableRoots(request, writableRepositories),
-		"approvalPolicy":        codexRunApprovalPolicy(request.ReadOnly),
+		"approvalPolicy":        codexRunApprovalPolicy(),
 	}
 	if request.Model != "" {
 		params["model"] = request.Model

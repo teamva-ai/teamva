@@ -22,16 +22,17 @@ TEAMVA_OPENCODE_TEST=1 go test ./provider/opencode -run '^TestBundledMCPContract
 
 ## 0.163 原生工具审批与活动
 
-普通 MCP 工具审批不是 command/file approval：原生使用 `mcpServer/elicitation/request`，
-`mode=form`，空 object schema，`_meta.codex_approval_kind=mcp_tool_call`。
-适配器只把这一精确形状映射到既有 `approval.requested` / `ApprovalDecision`；
-普通输入表单、URL/OAuth、设备验证不假装支持。原生返回值必须是
+Teamva 不向用户展示审批：Run 级 `teamva-issue` server 设置
+`default_tools_approval_mode = "approve"`，所有 MCP 工具调用预批准；其余动作使用
+`approvalPolicy=never`，需要升权的动作直接失败。`mcpServer/elicitation/request`
+（`mode=form`、空 object schema、`_meta.codex_approval_kind=mcp_tool_call`）的映射与
+`ApprovalDecision` 处理仅作为防御性回退保留，正常 Run 不应再产生
+`approval.requested`。普通输入表单、URL/OAuth、设备验证不假装支持。原生返回值必须是
 `action=accept|decline`、`content=null`、`_meta=null`，不能返回 command 的 `decision=accept`。
-只有用户明确选择、且请求本身提供的 session/always scope 才能持久化；一次允许不自动放行后续工具。
 
 旧适配器对该方法返回 -32601；原生 app-server 将客户端错误转成 Decline，进而显示
 `user rejected MCP tool call`，所以并不代表真的有人拒绝。确定性原生测试已复现旧行为，
-并验证修复后等待宿主决定、允许成功、拒绝失败，未改变 filesystem 或 granular policy。
+并验证修复后等待宿主决定、允许成功、拒绝失败，未改变 filesystem profile。
 取消 Run 或原生 interrupt 均不执行待审批工具，过期决定不可再使用；Run 结束清除该 Run
 的 pending approval。不支持的非空输入表单返回 unsupported，由原生安全拒绝，不发第二张二元审批卡。
 

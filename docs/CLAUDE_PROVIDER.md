@@ -27,7 +27,7 @@
 
 ## 原生协议与公共总结
 
-官方 `initialize` control request 完成后发送 SDK user frame；宿主处理 `can_use_tool` 与 `mcp_message` control request，并回复官方 `control_response` 格式。只允许本 Run 的 `mcp__teamva__*` 受控工具，未知工具、server、hooks 或权限升级全部拒绝。
+官方 `initialize` control request 完成后发送 SDK user frame；宿主处理 `can_use_tool` 与 `mcp_message` control request，并回复官方 `control_response` 格式。`can_use_tool` 对已暴露工具默认允许，不向用户弹审批；实际执行仍由 `toolScope` 校验，未知 `mcp_message` server 或 unsupported control request（hooks、权限升级）继续拒绝。
 
 `mcp_message` 的 `tools/call` 在执行任何文件/IPC 副作用之前，递归检查已 JSON 解码的 arguments 字符串键和值（含嵌套对象、数组和 Unicode escape）。若包含本次 `accountEnvironment` 投影的完整 API Key/Auth Token，返回安全 `isError` 工具回执，不执行调用、不改写参数、不写请求文件，也不终止整个 Run。不能只依靠可被 native 跳过的 `can_use_tool`。这只是已知投影凭据的最小防线，不扫描其它用户秘密，不承诺任意编码或跨工具编码 DLP；不含已知凭据的业务参数保持原样。
 

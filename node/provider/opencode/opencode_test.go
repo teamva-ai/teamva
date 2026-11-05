@@ -161,8 +161,26 @@ func TestHandleEventMapsProtocol(t *testing.T) {
 	}
 }
 
-func TestPermissionAsksBecomeApprovals(t *testing.T) {
+func capturePermissionReply(t *testing.T, client *Client) <-chan string {
+	t.Helper()
+	decisions := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Decision string `json:"decision"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		decisions <- body.Decision
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(server.Close)
+	client.baseURL = server.URL
+	return decisions
+}
+
+func TestPermissionAsksAreAutoApprovedWithoutApprovalEvents(t *testing.T) {
 	client := testClient(t)
+	decisions := capturePermissionReply(t, client)
 	state := &runState{request: provider.RunRequest{RunID: "run-1"}, session: "ses_1", compacted: map[string]string{}}
 	events, sink := captureSink()
 	event := v2Event{ID: "evt_1", Type: "permission.asked", Data: map[string]any{
@@ -171,19 +189,22 @@ func TestPermissionAsksBecomeApprovals(t *testing.T) {
 	if err := client.handleEvent(context.Background(), state, sink, event); err != nil {
 		t.Fatal(err)
 	}
-	if len(*events) != 1 || (*events)[0].Type != "approval.requested" {
-		t.Fatalf("expected approval request, got %#v", *events)
+	if len(*events) != 0 {
+		t.Fatalf("normal runs must not surface approvals: %#v", *events)
 	}
-	if (*events)[0].Payload["request_id"] != "per_1" || (*events)[0].Payload["action_kind"] != "shell" {
-		t.Fatalf("unexpected approval payload: %#v", (*events)[0].Payload)
-	}
-	if _, ok := client.approvals["per_1"]; !ok {
-		t.Fatal("approval must be pending")
+	select {
+	case decision := <-decisions:
+		if decision != "always" {
+			t.Fatalf("permission decision = %q, want always", decision)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("permission ask was not answered")
 	}
 }
 
 func TestReadOnlyPermissionAsksAreRejectedNatively(t *testing.T) {
 	client := testClient(t)
+	decisions := capturePermissionReply(t, client)
 	state := &runState{request: provider.RunRequest{RunID: "run-1", ReadOnly: true}, session: "ses_1", compacted: map[string]string{}}
 	events, sink := captureSink()
 	event := v2Event{ID: "evt_1", Type: "permission.asked", Data: map[string]any{
@@ -195,8 +216,13 @@ func TestReadOnlyPermissionAsksAreRejectedNatively(t *testing.T) {
 	if len(*events) != 0 {
 		t.Fatalf("read-only runs must not surface approvals: %#v", *events)
 	}
-	if _, ok := client.approvals["per_1"]; ok {
-		t.Fatal("read-only approval must not be stored")
+	select {
+	case decision := <-decisions:
+		if decision != "reject" {
+			t.Fatalf("read-only permission decision = %q, want reject", decision)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("read-only permission ask was not answered")
 	}
 }
 
