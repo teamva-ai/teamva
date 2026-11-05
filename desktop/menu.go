@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net/url"
+	goruntime "runtime"
 
 	"github.com/wailsapp/wails/v2/pkg/menu"
 	"github.com/wailsapp/wails/v2/pkg/menu/keys"
@@ -36,9 +37,12 @@ func newApplicationMenu(app *desktopApp) *menu.Menu {
 	applicationMenu.Append(menu.WindowMenu())
 
 	helpMenu := applicationMenu.AddSubmenu("帮助")
-	helpMenu.AddText("检查更新…", nil, func(*menu.CallbackData) {
-		app.checkForUpdates()
-	})
+	// The update manifest publishes a macOS ZIP only.
+	if goruntime.GOOS == "darwin" {
+		helpMenu.AddText("检查更新…", nil, func(*menu.CallbackData) {
+			app.checkForUpdates()
+		})
+	}
 	helpMenu.AddText("Teamva 网站", nil, func(*menu.CallbackData) {
 		app.withWailsContext(func(ctx context.Context) {
 			runtime.BrowserOpenURL(ctx, "https://teamva.dev")

@@ -3,7 +3,6 @@ package embedded
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
@@ -24,7 +23,7 @@ func writeExecutable(t *testing.T, path string) string {
 
 func TestBundledExecutableFromVendorDirectory(t *testing.T) {
 	root := t.TempDir()
-	platform := runtime.GOOS + "-" + runtime.GOARCH
+	platform := bundledPlatform()
 	want := writeExecutable(t, filepath.Join(root, "vendor", "opencode", platform, "opencode"))
 	// 嵌套目录验证向上查找。
 	nested := filepath.Join(root, "a", "b")
@@ -39,11 +38,24 @@ func TestBundledExecutableFromVendorDirectory(t *testing.T) {
 
 func TestBundledExecutableFromDataDir(t *testing.T) {
 	dataDir := t.TempDir()
-	platform := runtime.GOOS + "-" + runtime.GOARCH
+	platform := bundledPlatform()
 	want := writeExecutable(t, filepath.Join(dataDir, "providers", "opencode", platform, "opencode"))
 	t.Chdir(t.TempDir()) // 不在仓库树内，避免命中仓库 vendor 目录
 	if got := bundledExecutable("opencode", "opencode", dataDir); got != want {
 		t.Fatalf("bundledExecutable = %q, want %q", got, want)
+	}
+}
+
+func TestBundledPlatformMatchesReleasePayloadNames(t *testing.T) {
+	for _, item := range []struct{ goos, goarch, want string }{
+		{"darwin", "arm64", "darwin-arm64"},
+		{"darwin", "amd64", "darwin-x64"},
+		{"linux", "arm64", "linux-arm64"},
+		{"linux", "amd64", "linux-x64"},
+	} {
+		if got := bundledPlatformName(item.goos, item.goarch); got != item.want {
+			t.Errorf("bundledPlatformName(%s, %s) = %q, want %q", item.goos, item.goarch, got, item.want)
+		}
 	}
 }
 

@@ -10,18 +10,30 @@ import (
 // repository's vendor directory during development, before falling back to a
 // PATH lookup. Known layouts, in priority order:
 //
-//	<App>/Contents/Resources/<id>/<goos>-<goarch>/<command>
+//	<App>/Contents/Resources/<id>/<platform>/<command>
 //	<App>/Contents/Resources/<id>/<command>
-//	<repo>/vendor/<id>/<goos>-<goarch>/<command>   (walking up from CWD)
-//	<dataDir>/providers/<id>/<goos>-<goarch>/<command>
+//	<repo>/vendor/<id>/<platform>/<command>   (walking up from CWD)
+//	<dataDir>/providers/<id>/<platform>/<command>
 //
 // The returned path is absolute and executable, or empty when nothing is
 // bundled. Bundled runtimes are never installed into PATH or the system.
+// Release payloads name 64-bit x86 as x64 on every OS, unlike GOARCH's amd64.
+func bundledPlatform() string {
+	return bundledPlatformName(runtime.GOOS, runtime.GOARCH)
+}
+
+func bundledPlatformName(goos, goarch string) string {
+	if goarch == "amd64" {
+		goarch = "x64"
+	}
+	return goos + "-" + goarch
+}
+
 func bundledExecutable(id, command, dataDir string) string {
 	if id == "" || command == "" {
 		return ""
 	}
-	platform := runtime.GOOS + "-" + runtime.GOARCH
+	platform := bundledPlatform()
 	candidates := make([]string, 0, 8)
 	if executable, err := os.Executable(); err == nil {
 		dir := filepath.Dir(executable)
