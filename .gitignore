@@ -80,6 +80,7 @@ desktop/frontend/dist/*
 
 # go build default output name inside desktop/
 desktop/desktop
+desktop/desktop.exe
 
 # 拉取的 Provider 运行时（scripts/vendor/opencode.sh）
 vendor/opencode/

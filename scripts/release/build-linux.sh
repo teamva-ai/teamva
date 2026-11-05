@@ -78,6 +78,7 @@ ASSET_NAME="Teamva-$VERSION-linux-$ASSET_ARCH.AppImage"
   go run github.com/wailsapp/wails/v2/cmd/wails@v2.13.0 build \
     -clean \
     -trimpath \
+    -s \
     -platform "linux/$ARCH" \
     -tags webkit2_41 \
     -ldflags "-s -w -X main.version=$VERSION"

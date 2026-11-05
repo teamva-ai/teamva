@@ -54,6 +54,10 @@ done
 package="@opencode/cli-$platform"
 target_dir="$DEST_ROOT/$platform"
 manifest="$target_dir/manifest.json"
+binary_name="opencode"
+case "$platform" in
+  windows-*) binary_name="opencode.exe" ;;
+esac
 
 metadata="$(npm view "$package@$VERSION" dist.integrity --json)"
 integrity="$(printf '%s' "$metadata" | sed -n 's/.*"\(sha512-[^"]*\)".*/\1/p')"
@@ -62,7 +66,7 @@ if [[ -z "$integrity" ]]; then
   exit 1
 fi
 
-if [[ -f "$target_dir/opencode" && -f "$manifest" ]]; then
+if [[ -f "$target_dir/$binary_name" && -f "$manifest" ]]; then
   current_version="$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' "$manifest")"
   current_integrity="$(sed -n 's/.*"integrity": "\([^"]*\)".*/\1/p' "$manifest")"
   if [[ "$current_version" == "$VERSION" && "$current_integrity" == "$integrity" ]]; then
@@ -92,14 +96,15 @@ if [[ "$actual" != "$integrity" ]]; then
 fi
 
 tar -xzf "$tarball" -C "$tmp_dir"
-source_binary="$tmp_dir/package/bin/opencode"
+source_binary="$tmp_dir/package/bin/$binary_name"
 if [[ ! -f "$source_binary" ]]; then
-  printf '包内未找到 bin/opencode\n' >&2
+  printf '包内未找到 bin/%s\n' "$binary_name" >&2
   exit 1
 fi
 
 mkdir -p "$target_dir"
-install -m 0755 "$source_binary" "$target_dir/opencode"
+cp "$source_binary" "$target_dir/$binary_name"
+chmod 0755 "$target_dir/$binary_name"
 cat >"$manifest" <<EOF
 {
   "version": "$VERSION",

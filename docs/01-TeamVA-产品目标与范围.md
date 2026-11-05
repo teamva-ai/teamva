@@ -49,7 +49,6 @@ Teamva 把散落在终端里的多个 Coding Agent 组织成一个本地、持�
 - 上传或代管 Codex/OpenCode 凭据；
 - 在线备份、在线恢复或数据库损坏自动修复；
 - 自动迁移历史远端 PostgreSQL 用户数据；
-- 首版 Windows 桌面包；
 - 将 Wails binding 建成第二套业务 API；
 - 因检测到 Agent 间接循环而自动停止委派。
 

@@ -52,8 +52,8 @@
 
 - 不提供、也不需要在线备份、在线恢复、云同步或数据库损坏修复；
 - 基线/integrity 失败保留数据库并拒绝启动；旧库不升级或回填；
-- 首版没有 Windows 桌面包；Linux 提供未签名 AppImage；
-- 当前 macOS 与 Linux 制品均未签名，更新需手工替换；
+- Windows 提供未签名便携包，暂不含 Git 变更面板；Linux 提供未签名 AppImage；
+- 当前 macOS、Windows 与 Linux 制品均未签名，更新需手工替换；
 - Agent 间接循环不自动终止，依赖人工急停和可观察状态；
 - Skill scripts/hooks 以当前用户权限执行。
 

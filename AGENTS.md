@@ -193,7 +193,8 @@ TEAMVA_VERSION="$TEAMVA_RELEASE_VERSION" \
 
 脚本生成 macOS universal2 ZIP 与 DMG、`VERSION` 和 `SHA256SUMS`。Linux 用
 `TEAMVA_VERSION="$VERSION" ./scripts/release/build-linux.sh <amd64|arm64> <输出目录>` 生成 AppImage，脚本只在
-对应架构的 Linux 构建机原生运行。DMG 挂载后是「拖进 Applications」的安装窗口：
+对应架构的 Linux 构建机原生运行。Windows 用
+`TEAMVA_VERSION="$VERSION" ./scripts/release/build-windows.sh amd64 <输出目录>` 生成含内置运行时的便携 ZIP。DMG 挂载后是「拖进 Applications」的安装窗口：
 背景图带箭头，`解除拦截.txt` / `Unblock.txt` 放在图标下方，说明首次打开被 Gatekeeper 拦截时执行的
 `xattr` 命令。图标位置和窗口尺寸来自 `desktop/build/dmg/DS_Store` 模板，不需要构建机授予
 「自动化 → 访达」权限，因此可在 CI 和无 GUI 会话中稳定复现。模板只在条目名或坐标变化时才需要重建，
@@ -202,9 +203,10 @@ TEAMVA_VERSION="$TEAMVA_RELEASE_VERSION" \
 当前制品未签名、未公证；更新只下载并验证 SHA-256，用户退出后手工替换应用。发布前必须真实检查
 `/downloads/desktop/*`，缺失文件应返回 404，不能被 SPA fallback 伪装成 200 HTML。
 
-`Release` workflow（手动触发）构建 macOS universal DMG/ZIP 与 Linux x86_64/arm64 AppImage。它先创建草稿
-Release，全部平台和合并后的 `sha256.txt` 上传成功才公开；任一失败保持草稿，避免半套产物出现在下载页。
-当前不构建 Windows 桌面包，也不实现在线备份/恢复。
+`Release` workflow（推送 v* 标签或手动触发）构建 macOS universal DMG/ZIP、Windows x64 便携包与
+Linux x86_64/arm64 AppImage。它先创建草稿 Release，全部平台和合并后的 `sha256.txt` 上传成功才自动公开；
+任一失败保持草稿，避免半套产物出现在下载页。Windows 版暂不提供 Git 变更面板（Git 安全沙箱仅覆盖
+macOS/Linux），也不实现在线备份/恢复。
 
 ## 完整应用验收清单
 

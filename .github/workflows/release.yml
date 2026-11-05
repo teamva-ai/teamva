@@ -1,6 +1,9 @@
 name: Release
 
 on:
+  # Pushing a version tag builds and publishes every platform without a manual run.
+  push:
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
       version:
@@ -32,6 +35,7 @@ jobs:
     outputs:
       tag: ${{ steps.validate.outputs.tag }}
       version: ${{ steps.validate.outputs.version }}
+      prerelease: ${{ steps.validate.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,15 +46,25 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           INPUT_VERSION: ${{ inputs.version }}
+          INPUT_PRERELEASE: ${{ inputs.prerelease }}
         run: |
           set -euo pipefail
-          VERSION="${INPUT_VERSION#v}"
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            TAG="$GITHUB_REF_NAME"
+            PRERELEASE="false"
+            case "$TAG" in *-*) PRERELEASE="true" ;; esac
+          else
+            VERSION="${INPUT_VERSION#v}"
+            TAG="v$VERSION"
+            PRERELEASE="${INPUT_PRERELEASE:-false}"
+          fi
+          VERSION="${TAG#v}"
           if ! printf '%s' "$VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?(\+[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$'; then
-            echo "::error::版本号无效：${INPUT_VERSION}"
+            echo "::error::版本号无效：$TAG"
             exit 1
           fi
-          TAG="v$VERSION"
-          if git ls-remote --tags origin "refs/tags/$TAG" | grep -q .; then
+          # A tag push already created the tag; only manual runs need the check.
+          if [ "$GITHUB_EVENT_NAME" != "push" ] && git ls-remote --tags origin "refs/tags/$TAG" | grep -q .; then
             echo "::error::标签 $TAG 已存在"
             exit 1
           fi
@@ -58,23 +72,28 @@ jobs:
             echo "::error::Release $TAG 已存在"
             exit 1
           fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          {
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "prerelease=$PRERELEASE"
+          } >> "$GITHUB_OUTPUT"
 
-      # Tags are pushed before any artifact exists: the draft keeps partial
-      # builds invisible on the Releases page and download links.
-      - name: Create tag and draft release
+      # The draft keeps partial builds invisible on the Releases page and
+      # download links until every platform and the merged checksums are up.
+      - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.validate.outputs.tag }}
           VERSION: ${{ steps.validate.outputs.version }}
-          PRERELEASE: ${{ inputs.prerelease }}
+          PRERELEASE: ${{ steps.validate.outputs.prerelease }}
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag "$TAG"
-          git push origin "$TAG"
+          if [ "$GITHUB_EVENT_NAME" != "push" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi
 
           cat > /tmp/release-notes.md <<'NOTES'
           # Teamva <VERSION>
@@ -82,6 +101,7 @@ jobs:
           ## 下载 / Downloads
 
           - macOS（Apple Silicon 与 Intel）: `teamva-desktop-darwin-universal.dmg`
+          - Windows x64: `Teamva-<VERSION>-windows-x64.zip`
           - Linux x86_64: `Teamva-<VERSION>-linux-x86_64.AppImage`
           - Linux arm64: `Teamva-<VERSION>-linux-arm64.AppImage`
           - 校验和 / Checksums: `sha256.txt`
@@ -97,6 +117,11 @@ jobs:
           sudo /usr/bin/xattr -rd com.apple.quarantine "/Applications/Teamva.app"
           ```
 
+          ### Windows
+
+          解压后运行 `Teamva.exe`。程序未签名，SmartScreen 会提示“Windows 已保护你的电脑”：
+          点击“更多信息”→“仍要运行”。当前 Windows 版暂不提供 Git 变更面板。
+
           ### Linux
 
           ```bash
@@ -109,9 +134,8 @@ jobs:
 
           ---
 
-          Builds are produced by GitHub Actions from this repository. The macOS app is
-          unsigned and the Linux AppImage is unverified by the project; verify the
-          SHA-256 value in `sha256.txt` before running either.
+          Builds are produced by GitHub Actions from this repository. All artifacts are
+          unsigned; verify the SHA-256 value in `sha256.txt` before running them.
           NOTES
           sed -i "s/<VERSION>/${VERSION}/g" /tmp/release-notes.md
 
@@ -140,6 +164,9 @@ jobs:
           - runner: ubuntu-24.04-arm
             platform: linux
             arch: arm64
+          - runner: windows-latest
+            platform: windows
+            arch: amd64
     steps:
       - uses: actions/checkout@v4
 
@@ -178,7 +205,15 @@ jobs:
           TEAMVA_VERSION: ${{ needs.release.outputs.version }}
         run: ./scripts/release/build-linux.sh ${{ matrix.arch }} "$GITHUB_WORKSPACE/dist/release"
 
+      - name: Build Windows package
+        if: matrix.platform == 'windows'
+        shell: bash
+        env:
+          TEAMVA_VERSION: ${{ needs.release.outputs.version }}
+        run: bash ./scripts/release/build-windows.sh amd64 "$GITHUB_WORKSPACE/dist/release"
+
       - name: Upload installers to release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.release.outputs.tag }}
@@ -188,6 +223,8 @@ jobs:
           shopt -s nullglob
           if [ "$PLATFORM" = "mac" ]; then
             files=(dist/release/*.dmg dist/release/*.zip)
+          elif [ "$PLATFORM" = "windows" ]; then
+            files=(dist/release/*windows-x64.zip)
           else
             files=(dist/release/*.AppImage)
           fi
@@ -208,6 +245,7 @@ jobs:
           exit 1
 
       - name: Write checksum fragment
+        shell: bash
         env:
           PLATFORM: ${{ matrix.platform }}
           ARCH: ${{ matrix.arch }}
@@ -259,6 +297,7 @@ jobs:
           for pattern in \
             '^[0-9a-f]{64}  teamva-desktop-darwin-universal\.dmg$' \
             '^[0-9a-f]{64}  teamva-desktop-darwin-universal\.zip$' \
+            '^[0-9a-f]{64}  Teamva-[^ ]+-windows-x64\.zip$' \
             '^[0-9a-f]{64}  Teamva-[^ ]+-linux-x86_64\.AppImage$' \
             '^[0-9a-f]{64}  Teamva-[^ ]+-linux-arm64\.AppImage$'; do
             if ! grep -Eq "$pattern" sha256.txt; then
@@ -296,7 +335,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.release.outputs.tag }}
-          PRERELEASE: ${{ inputs.prerelease }}
+          PRERELEASE: ${{ needs.release.outputs.prerelease }}
         run: |
           set -euo pipefail
           args=(--draft=false --repo "$GITHUB_REPOSITORY")
