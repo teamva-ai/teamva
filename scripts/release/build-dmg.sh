@@ -2,7 +2,7 @@
 #
 # Build the drag-to-Applications installer disk image.
 #
-# The volume ships an unsigned .app, so Gatekeeper blocks the first launch.
+# The volume ships an ad-hoc signed app, so Gatekeeper still blocks the first launch.
 # Two plain-text helpers sit under the app icons and explain the one-time
 # `xattr` command; the background art points at them with arrows.
 #
@@ -71,7 +71,6 @@ trap cleanup EXIT
 # ---- staging ------------------------------------------------------------
 mkdir -p "$STAGING/source"
 ditto "$APP_PATH" "$STAGING/source/$APP_NAME"
-cp "$ROOT_DIR/LICENSE" "$ROOT_DIR/NOTICE" "$ROOT_DIR/THIRD_PARTY_NOTICES.md" "$STAGING/source/$APP_NAME/Contents/Resources/"
 ln -s /Applications "$STAGING/source/Applications"
 cp "$BUILD_ASSETS/dmg/解除拦截.txt" "$STAGING/source/解除拦截.txt"
 cp "$BUILD_ASSETS/dmg/Unblock.txt" "$STAGING/source/Unblock.txt"

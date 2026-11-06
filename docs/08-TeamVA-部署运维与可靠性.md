@@ -2,7 +2,7 @@
 
 ## 1. 当前发布目标
 
-当前发布 macOS universal2 桌面 ZIP/DMG、Windows x64 便携包与 Linux x86_64/arm64 AppImage。制品由
+当前发布 macOS arm64/x64 桌面 ZIP/DMG、Windows x64 便携包与 Linux x86_64/arm64 AppImage。制品由
 GitHub Actions 在对应平台原生构建，不依赖 Cloudflare、Docker、Pages 或单独安装的 CLI。
 
 ## 2. 构建
@@ -16,11 +16,11 @@ TEAMVA_VERSION="$(tr -d '\r\n' < VERSION)" \
 
 1. 构建 Web（默认且仅支持同源 API）；
 2. 暂存唯一 Web 构建到忽略的 `desktop/frontend/dist`；
-3. 用 Wails v2.13.x 构建 darwin/universal；
-4. 注入版本并验证 arm64 + x86_64；
-5. 生成 ZIP、`VERSION` 和 `SHA256SUMS`。
+3. 分别用 Wails v2.13.x 构建 darwin/arm64 与 darwin/amd64；
+4. 注入版本并分别验证 arm64、x86_64 单架构；
+5. 生成各架构 ZIP/DMG、`VERSION` 和 `SHA256SUMS`。
 
-当前开发制品未签名、未公证。若决定面向普通 macOS 用户公开分发，签名/公证是独立发布门禁。
+当前开发制品使用 ad-hoc 签名，未使用 Developer ID 签名、未公证。若决定面向普通 macOS 用户公开分发，签名/公证是独立发布门禁。
 
 ## 3. 更新
 

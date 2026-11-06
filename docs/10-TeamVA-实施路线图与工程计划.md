@@ -14,7 +14,7 @@
 - Project、Resource、Agent/Skill、Issue/comment/mention、Run/event；
 - Policy、Approval、Memory、Schedule、Audit；
 - 多 Agent 并行与间接循环委派；
-- 日志、诊断、更新检查和 universal2 未签名构建；
+- 日志、诊断、更新检查和 arm64/x64 ad-hoc 签名构建；
 - 本地 API、浏览器、真实 Provider 和 SIGKILL 验收脚本；
 
 ## 3. 首发前 P0
@@ -42,7 +42,7 @@
 ### 3.4 发布制品
 
 - 决定公开首发是否启用 Developer ID 签名和公证；
-- 构建 universal2 ZIP、VERSION、SHA256SUMS；
+- 构建 arm64/x64 ZIP/DMG、VERSION、SHA256SUMS；
 - 部署 `/downloads/desktop/*`，缺失文件必须 404；
 - 真实下载、校验、解压替换和版本升级；
 - 固化 release commit/tag。

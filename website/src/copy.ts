@@ -86,7 +86,7 @@ const en = {
       ["How can I use another device?", "Set a password and enable Remote access in local settings, then connect through a trusted LAN or VPN. The guide’s Permissions section covers network access and safe setup."],
       ["How should I organize parallel edits?", "Use separate worktrees or directories when agents need independent development state. Sessions can share authorized resources, so review their permissions before running. The guide explains resource authorization and security boundaries."],
       ["What needs to stay running?", "Keep your computer and the Teamva service running while agents and scheduled tasks execute. You can preview schedule triggers and inspect each run’s history."],
-      ["How do I get started?", "Build the current development preview from source and follow the setup guide to configure your coding tools. macOS packaging produces universal ZIP and drag-to-Applications DMG artifacts that are currently unsigned and not notarized."]
+      ["How do I get started?", "Build the current development preview from source and follow the setup guide to configure your coding tools. macOS packaging produces separate arm64 and x64 ZIP and drag-to-Applications DMG artifacts that are ad-hoc signed but not notarized."]
     ]
   },
   start: {
@@ -177,7 +177,7 @@ const zh: SiteCopy = {
       ["怎样从其他设备访问？", "在本机设置中配置密码并开启远程访问，即可通过可信局域网或 VPN 连接。使用指南的「权限与隔离」章节提供网络访问与安全设置说明。"],
       ["怎样安排多个 Agent 并行修改？", "需要独立开发状态时，使用不同的 worktree 或目录。会话可以共享授权资源，运行前应检查权限；使用指南说明资源授权和安全边界。"],
       ["执行工作时需要保持什么运行？", "Agent 和定时任务执行时，电脑与 Teamva 服务需要保持运行。你可以提前预览触发时间，并查看每次运行的历史。"],
-      ["怎样开始使用？", "从源码构建当前开发预览，按使用指南配置编程工具。macOS 打包提供 universal ZIP 与拖动安装 DMG 制品，目前未签名、未公证。"]
+      ["怎样开始使用？", "从源码构建当前开发预览，按使用指南配置编程工具。macOS 打包分别提供 arm64 与 x64 的 ZIP 和拖动安装 DMG 制品，使用 ad-hoc 签名，未公证。"]
     ]
   },
   start: {

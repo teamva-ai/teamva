@@ -44,7 +44,7 @@
 - 两个独立 SIGKILL 子进程测试恢复 app/runtime 数据；
 - 真实 OpenCode 与 Codex 完成 Resource、Issue 工具评论、Run 和手动计划任务；
 - 真实 Chrome 1280×820 和 390×844 验证本地 Session/UI；
-- Wails v2.13 macOS arm64 开发构建已从真实 `.app` 启动并逐页验收；universal2 发布制品另由发布脚本构建。
+- Wails v2.13 macOS arm64 开发构建已从真实 `.app` 启动并逐页验收；arm64/x64 发布制品另由发布脚本构建。
 
 新增循环委派门禁应证明：用户激活 A，A @B，B 回 @A，A 再完成；三个 Run 全部 succeeded，评论顺序完整。
 
@@ -53,7 +53,7 @@
 - 不提供、也不需要在线备份、在线恢复、云同步或数据库损坏修复；
 - 基线/integrity 失败保留数据库并拒绝启动；旧库不升级或回填；
 - Windows 提供未签名便携包，暂不含 Git 变更面板；Linux 提供未签名 AppImage；
-- 当前 macOS、Windows 与 Linux 制品均未签名，更新需手工替换；
+- 当前 macOS 制品使用 ad-hoc 签名、未使用 Developer ID 签名、未公证；Windows/Linux 制品未签名，更新需手工替换；
 - Agent 间接循环不自动终止，依赖人工急停和可观察状态；
 - Skill scripts/hooks 以当前用户权限执行。
 
@@ -62,7 +62,7 @@
 1. 在最终 release commit 上复验 Codex/OpenCode 与循环委派；
 2. 建立 CI 或等价持续门禁；
 3. 决定是否正式签名/公证；
-4. 构建并校验 universal2 发布制品；
+4. 构建并校验 arm64/x64 发布制品；
 5. 部署 `/downloads/desktop`，真实下载和升级；
 6. 创建 release commit/tag 和无秘密验收报告。
 

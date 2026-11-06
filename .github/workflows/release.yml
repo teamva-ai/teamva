@@ -100,7 +100,8 @@ jobs:
 
           ## 下载 / Downloads
 
-          - macOS（Apple Silicon 与 Intel）: `teamva-desktop-darwin-universal.dmg`
+          - macOS Apple Silicon: `teamva-desktop-darwin-arm64.dmg`
+          - macOS Intel: `teamva-desktop-darwin-x64.dmg`
           - Windows x64: `Teamva-<VERSION>-windows-x64.zip`
           - Linux x86_64: `Teamva-<VERSION>-linux-x86_64.AppImage`
           - Linux arm64: `Teamva-<VERSION>-linux-arm64.AppImage`
@@ -110,7 +111,7 @@ jobs:
 
           ### macOS
 
-          打开 DMG，把 Teamva 拖进“应用程序”。应用未签名，首次打开会被 Gatekeeper 拦截：
+          打开 DMG，把 Teamva 拖进“应用程序”。应用使用 ad-hoc 签名、未使用 Apple Developer ID 签名，也未公证，首次打开会被 Gatekeeper 拦截：
           右键应用选择“打开”，或执行下面的命令放行一次。
 
           ```bash
@@ -134,8 +135,9 @@ jobs:
 
           ---
 
-          Builds are produced by GitHub Actions from this repository. All artifacts are
-          unsigned; verify the SHA-256 value in `sha256.txt` before running them.
+          Builds are produced by GitHub Actions from this repository. macOS builds are
+          ad-hoc signed but not Developer ID signed or notarized; other artifacts are
+          unsigned. Verify the SHA-256 value in `sha256.txt` before running them.
           NOTES
           sed -i "s/<VERSION>/${VERSION}/g" /tmp/release-notes.md
 
@@ -153,11 +155,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # One universal DMG covers Apple Silicon and Intel. The build script
-          # already produces and validates the universal2 payload.
+          # The build script produces separate arm64 and x64 DMG/ZIP pairs.
           - runner: macos-latest
             platform: mac
-            arch: universal
+            arch: split
           - runner: ubuntu-latest
             platform: linux
             arch: amd64
@@ -254,7 +255,9 @@ jobs:
           mkdir -p dist/checksums
           fragment="dist/checksums/sha256-${PLATFORM}-${ARCH}.txt"
           if [ "$PLATFORM" = "mac" ]; then
-            (cd dist/release && shasum -a 256 teamva-desktop-darwin-universal.dmg teamva-desktop-darwin-universal.zip) > "$fragment"
+            (cd dist/release && shasum -a 256 \
+              teamva-desktop-darwin-arm64.dmg teamva-desktop-darwin-arm64.zip \
+              teamva-desktop-darwin-x64.dmg teamva-desktop-darwin-x64.zip) > "$fragment"
           else
             cp dist/release/sha256.txt "$fragment"
           fi
@@ -295,8 +298,10 @@ jobs:
           fi
           # Every platform must appear in the manifest before it goes public.
           for pattern in \
-            '^[0-9a-f]{64}  teamva-desktop-darwin-universal\.dmg$' \
-            '^[0-9a-f]{64}  teamva-desktop-darwin-universal\.zip$' \
+            '^[0-9a-f]{64}  teamva-desktop-darwin-arm64\.dmg$' \
+            '^[0-9a-f]{64}  teamva-desktop-darwin-arm64\.zip$' \
+            '^[0-9a-f]{64}  teamva-desktop-darwin-x64\.dmg$' \
+            '^[0-9a-f]{64}  teamva-desktop-darwin-x64\.zip$' \
             '^[0-9a-f]{64}  Teamva-[^ ]+-windows-x64\.zip$' \
             '^[0-9a-f]{64}  Teamva-[^ ]+-linux-x86_64\.AppImage$' \
             '^[0-9a-f]{64}  Teamva-[^ ]+-linux-arm64\.AppImage$'; do

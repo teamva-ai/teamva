@@ -180,13 +180,13 @@ pnpm --filter @teamva/web build
 open "desktop/build/bin/Teamva.app"
 ```
 
-发布脚本产出 universal2 ZIP、可拖入 Applications 的 DMG、`VERSION` 与 `SHA256SUMS`：
+发布脚本产出 macOS arm64 与 x64 各自的 ZIP、可拖入 Applications 的 DMG、`VERSION` 与 `SHA256SUMS`：
 
 ```bash
 TEAMVA_VERSION="$(tr -d '\r\n' < VERSION)" ./scripts/release/build-desktop.sh
 ```
 
-**当前为开发预览：** 制品未签名、未公证。DMG 附中英文解除隔离说明，仅用于你信任的已安装应用；不是删除代码签名。更新采用校验下载，不在运行中自动替换应用；不宣称已有 Windows/Linux 桌面包或公开生产发布。[桌面构建说明 →](docs/DESKTOP_ARCHITECTURE.md)
+**当前为开发预览：** macOS 制品使用 ad-hoc 签名，但未使用 Developer ID 签名、未公证。DMG 附中英文解除隔离说明，仅用于你信任的已安装应用；不是删除代码签名。更新采用校验下载，不在运行中自动替换应用；不宣称已有 Windows/Linux 桌面包或公开生产发布。[桌面构建说明 →](docs/DESKTOP_ARCHITECTURE.md)
 
 ### 品牌官网
 

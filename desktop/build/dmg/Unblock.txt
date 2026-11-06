@@ -1,6 +1,6 @@
 Teamva is blocked by macOS on first launch
 
-Reason: the installer is not signed or notarized by Apple, so Gatekeeper blocks the first launch.
+Reason: the installer is ad-hoc signed but not signed with an Apple Developer ID or notarized, so Gatekeeper blocks the first launch.
 
 Drag Teamva into "Applications" first, then follow these steps:
 

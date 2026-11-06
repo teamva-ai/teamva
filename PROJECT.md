@@ -180,13 +180,13 @@ pnpm --filter @teamva/web build
 open "desktop/build/bin/Teamva.app"
 ```
 
-The release script produces a universal2 ZIP, a drag-to-Applications DMG, `VERSION`, and `SHA256SUMS`:
+The release script produces separate arm64 and x64 ZIPs, drag-to-Applications DMGs, `VERSION`, and `SHA256SUMS`:
 
 ```bash
 TEAMVA_VERSION="$(tr -d '\r\n' < VERSION)" ./scripts/release/build-desktop.sh
 ```
 
-**Development preview:** artifacts are unsigned and not notarized. The DMG includes English and Chinese instructions for clearing quarantine from the trusted installed app; this is not code-signature removal. Updates are checksum-verified downloads, not automatic in-place replacement. Windows/Linux desktop packages and a public production release are not claimed. [Desktop build guide →](docs/DESKTOP_ARCHITECTURE.md)
+**Development preview:** macOS artifacts carry an ad-hoc signature but are not Developer ID signed or notarized. The DMG includes English and Chinese instructions for clearing quarantine from the trusted installed app; this is not code-signature removal. Updates are checksum-verified downloads, not automatic in-place replacement. Windows/Linux desktop packages and a public production release are not claimed. [Desktop build guide →](docs/DESKTOP_ARCHITECTURE.md)
 
 ### Marketing website
 

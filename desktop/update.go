@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"time"
 
@@ -19,10 +20,14 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-const (
-	desktopUpdateBaseURL = "https://teamva.dev/downloads/desktop"
-	desktopUpdateAsset   = "teamva-desktop-darwin-universal.zip"
-)
+const desktopUpdateBaseURL = "https://teamva.dev/downloads/desktop"
+
+func desktopUpdateAssetForArch(arch string) string {
+	if arch == "arm64" {
+		return "teamva-desktop-darwin-arm64.zip"
+	}
+	return "teamva-desktop-darwin-x64.zip"
+}
 
 type desktopRelease struct {
 	CurrentVersion string
@@ -60,7 +65,7 @@ func (a *desktopApp) runUpdateCheck(wailsContext context.Context) {
 	}
 	choice, err := runtime.MessageDialog(wailsContext, runtime.MessageDialogOptions{
 		Type: runtime.QuestionDialog, Title: "发现新版本 " + release.LatestVersion,
-		Message: "将下载经过 SHA-256 校验的未签名 macOS 应用压缩包。下载后请退出当前应用，解压并替换旧版本。",
+		Message: "将下载经过 SHA-256 校验、使用 ad-hoc 签名的 macOS 应用压缩包（未公证）。下载后请退出当前应用，解压并替换旧版本。",
 		Buttons: []string{"下载更新", "取消"}, DefaultButton: "下载更新", CancelButton: "取消",
 	})
 	if err != nil || choice != "下载更新" {
@@ -120,7 +125,7 @@ func checkDesktopUpdate(
 	release := desktopRelease{
 		CurrentVersion: currentVersion, LatestVersion: latestVersion,
 		Available: isNewerDesktopVersion(latestVersion, currentVersion),
-		AssetName: desktopUpdateAsset, BaseURL: baseURL,
+		AssetName: desktopUpdateAssetForArch(goruntime.GOARCH), BaseURL: baseURL,
 	}
 	if !release.Available {
 		return release, nil

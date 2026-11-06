@@ -11,7 +11,7 @@
 | Runtime | 真实 Codex/OpenCode、Agent Skills、工具、原生确认、停止和 session 恢复 |
 | Browser | 隔离 Chrome profile、桌面/移动宽度、真实 HTTP 状态 |
 | Desktop | Wails `.app` 从 Finder 启动、菜单、单实例、退出、诊断、更新 |
-| Release | universal2、版本、ZIP、SHA-256、公开下载路径 |
+| Release | arm64/x64、版本、ZIP/DMG、SHA-256、公开下载路径 |
 
 ## 2. 自动化门禁
 

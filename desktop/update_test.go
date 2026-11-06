@@ -9,11 +9,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 )
 
 func TestDesktopUpdateCheckAndVerifiedDownload(t *testing.T) {
+	assetName := desktopUpdateAssetForArch(goruntime.GOARCH)
 	payload := []byte("desktop-update-zip")
 	digest := sha256.Sum256(payload)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -21,8 +23,8 @@ func TestDesktopUpdateCheckAndVerifiedDownload(t *testing.T) {
 		case "/VERSION":
 			_, _ = writer.Write([]byte("1.2.0\n"))
 		case "/SHA256SUMS":
-			_, _ = fmt.Fprintf(writer, "%s  %s\n", hex.EncodeToString(digest[:]), desktopUpdateAsset)
-		case "/" + desktopUpdateAsset:
+			_, _ = fmt.Fprintf(writer, "%s  %s\n", hex.EncodeToString(digest[:]), assetName)
+		case "/" + assetName:
 			_, _ = writer.Write(payload)
 		default:
 			http.NotFound(writer, request)
@@ -78,8 +80,9 @@ func TestDesktopUpdateDoesNotDowngradeOrFetchManifest(t *testing.T) {
 }
 
 func TestDesktopUpdateRejectsChecksumMismatch(t *testing.T) {
+	assetName := desktopUpdateAssetForArch(goruntime.GOARCH)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path == "/"+desktopUpdateAsset {
+		if request.URL.Path == "/"+assetName {
 			_, _ = writer.Write([]byte("tampered"))
 			return
 		}
@@ -88,7 +91,7 @@ func TestDesktopUpdateRejectsChecksumMismatch(t *testing.T) {
 	defer server.Close()
 	destination := filepath.Join(t.TempDir(), "update.zip")
 	_, err := downloadDesktopUpdate(t.Context(), desktopRelease{
-		Available: true, AssetName: desktopUpdateAsset, Checksum: fmt.Sprintf("%064d", 0), BaseURL: server.URL,
+		Available: true, AssetName: assetName, Checksum: fmt.Sprintf("%064d", 0), BaseURL: server.URL,
 	}, destination, nil)
 	if err == nil {
 		t.Fatal("checksum mismatch was accepted")
@@ -99,6 +102,7 @@ func TestDesktopUpdateRejectsChecksumMismatch(t *testing.T) {
 }
 
 func TestDesktopUpdateFailurePreservesExistingArchive(t *testing.T) {
+	assetName := desktopUpdateAssetForArch(goruntime.GOARCH)
 	for _, failure := range []string{"checksum", "truncated response", "HTTP error"} {
 		t.Run(failure, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -118,7 +122,7 @@ func TestDesktopUpdateFailurePreservesExistingArchive(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err := downloadDesktopUpdate(t.Context(), desktopRelease{
-				Available: true, AssetName: desktopUpdateAsset, Checksum: strings.Repeat("0", 64), BaseURL: server.URL,
+				Available: true, AssetName: assetName, Checksum: strings.Repeat("0", 64), BaseURL: server.URL,
 			}, destination, nil)
 			if err == nil {
 				t.Fatal("failed download was accepted")
@@ -191,5 +195,14 @@ func TestDesktopVersionComparisonUsesSemanticPrereleaseOrder(t *testing.T) {
 		if actual := isNewerDesktopVersion(test.candidate, test.current); actual != test.newer {
 			t.Fatalf("isNewerDesktopVersion(%q, %q)=%t want %t", test.candidate, test.current, actual, test.newer)
 		}
+	}
+}
+
+func TestDesktopUpdateAssetMatchesArchitecture(t *testing.T) {
+	if got := desktopUpdateAssetForArch("arm64"); got != "teamva-desktop-darwin-arm64.zip" {
+		t.Fatalf("arm64 asset = %q", got)
+	}
+	if got := desktopUpdateAssetForArch("amd64"); got != "teamva-desktop-darwin-x64.zip" {
+		t.Fatalf("amd64 asset = %q", got)
 	}
 }
