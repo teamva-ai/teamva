@@ -88,7 +88,7 @@ cleanup() {
   fi
 
   if [[ -n "$SCHEDULE_RUN_ID" ]]; then
-    if ! best_effort_stop_run "$SCHEDULE_RUN_ID" '' ''; then
+    if ! best_effort_stop_run "$SCHEDULE_RUN_ID" "$SCHEDULE_ISSUE_ID" "$SCHEDULE_INSTANCE_ID"; then
       printf 'FAIL: known scheduled Run cleanup was not verified\n' >&2
       run_cleanup_failed=1
     fi
@@ -140,7 +140,7 @@ cleanup() {
 }
 
 [[ -n "$STATE_FILE" && -s "$STATE_FILE" ]] || fail 'runtime state is unavailable'
-[[ "$PROVIDER" == opencode || "$PROVIDER" == codex ]] || fail 'unsupported local Provider'
+[[ "$PROVIDER" == opencode || "$PROVIDER" == codex || "$PROVIDER" == claude ]] || fail 'unsupported local Provider'
 
 for required_command in cmp curl env git grep jq mktemp node; do
   command -v "$required_command" >/dev/null 2>&1 || fail "missing command: $required_command"
@@ -587,7 +587,7 @@ discover_and_stop_issue_run() {
 }
 
 discover_and_stop_scheduled_runs() {
-  local payload="" occurrence_count="" occurrence_id="" occurrence_status="" run_id=""
+  local payload="" run_payload="" occurrence_count="" occurrence_id="" occurrence_status="" run_id="" occurrence_issue_id="" occurrence_instance_id=""
   local index cleanup_failed=0 known_run_found=false
   [[ -n "$TASK_ID" && -n "$PROJECT_ID" && -n "$AGENT_ID" ]] || return 1
   [[ "$TASK_ID" =~ ^[A-Za-z0-9_-]{1,128}$ ]] || return 1
@@ -632,10 +632,31 @@ discover_and_stop_scheduled_runs() {
       cleanup_failed=1
       continue
     fi
+    occurrence_issue_id="$(jq -r --argjson index "$index" '.data.items[$index].issue_id // ""' \
+      <<<"$payload" 2>/dev/null)" || {
+      cleanup_failed=1
+      continue
+    }
+    [[ -n "$occurrence_issue_id" ]] || {
+      cleanup_failed=1
+      continue
+    }
+    if ! run_payload="$(cleanup_get "/v1/runs/$run_id")"; then
+      cleanup_failed=1
+      continue
+    fi
+    occurrence_instance_id="$(jq -r '.data.issue_agent_instance_id // ""' <<<"$run_payload")" || {
+      cleanup_failed=1
+      continue
+    }
+    [[ -n "$occurrence_instance_id" ]] || {
+      cleanup_failed=1
+      continue
+    }
     if [[ -n "$SCHEDULE_RUN_ID" && "$run_id" == "$SCHEDULE_RUN_ID" ]]; then
       known_run_found=true
     fi
-    if ! best_effort_stop_run "$run_id" '' ''; then
+    if ! best_effort_stop_run "$run_id" "$occurrence_issue_id" "$occurrence_instance_id"; then
       cleanup_failed=1
     fi
   done
@@ -649,7 +670,7 @@ discover_and_stop_scheduled_runs() {
 recycle_idle_provider_runtime() {
   local payload="" attempt recycled="" active="" remaining=""
   [[ -n "$COMPUTER_ID" && "$COMPUTER_ID" =~ ^[A-Za-z0-9_-]{1,128}$ && \
-    ("$PROVIDER" == codex || "$PROVIDER" == opencode) ]] || return 1
+    ("$PROVIDER" == codex || "$PROVIDER" == opencode || "$PROVIDER" == claude) ]] || return 1
 
   for ((attempt = 0; attempt < 100; attempt++)); do
     if payload="$(cleanup_post \
@@ -680,6 +701,21 @@ recycle_idle_provider_runtime() {
 }
 
 data() { jq -er ".data$1" <<<"$RESPONSE"; }
+
+wait_for_resource_ready() {
+  local resource_id="$1" label="$2" attempt status git
+  for attempt in $(seq 1 100); do
+    api GET "/v1/projects/$PROJECT_ID/resources" 200
+    status="$(jq -r --arg id "$resource_id" '.data.items[] | select(.id == $id) | .status // ""' <<<"$RESPONSE")"
+    git="$(jq -r --arg id "$resource_id" '.data.items[] | select(.id == $id) | (.git_detected // false)' <<<"$RESPONSE")"
+    if [[ "$status" == ready && "$git" == true ]]; then
+      return 0
+    fi
+    [[ "$status" != failed ]] || fail "$label validation failed"
+    sleep 0.1
+  done
+  fail "$label did not become a ready Git resource"
+}
 
 api() {
   local method="$1" path="$2" expected="$3" body="${4:-}" idempotency="${5:-}"
@@ -935,8 +971,7 @@ RESOURCE_ID="$(data '.id')"
 RESOURCE_VERSION="$(data '.version')"
 api POST "/v1/projects/$PROJECT_ID/resources/$RESOURCE_ID/validate" 202 \
   "$(jq -cn --argjson version "$RESOURCE_VERSION" '{expected_version:$version}')"
-[[ "$(data '.status')" == ready && "$(data '.git_detected')" == true ]] || \
-  fail 'local resource is not a ready Git resource'
+wait_for_resource_ready "$RESOURCE_ID" 'local resource'
 
 for partial_spec in \
   "$PARTIAL_RESOURCE_A|$PARTIAL_RESOURCE_A_DISPLAY|a" \
@@ -955,8 +990,7 @@ for partial_spec in \
   partial_version="$(data '.version')"
   api POST "/v1/projects/$PROJECT_ID/resources/$partial_id/validate" 202 \
     "$(jq -cn --argjson version "$partial_version" '{expected_version:$version}')"
-  [[ "$(data '.status')" == ready && "$(data '.git_detected')" == true ]] || \
-    fail 'partial resource is not a ready Git resource'
+  wait_for_resource_ready "$partial_id" 'partial resource'
   if [[ "$partial_key" == a ]]; then
     PARTIAL_RESOURCE_A_ID="$partial_id"
   else
@@ -1095,28 +1129,32 @@ SCHEDULE_RUN_ID="$(data '.run_id')"
 [[ -n "$SCHEDULE_RUN_ID" ]] || fail 'schedule trigger did not create a Run'
 
 api GET "/v1/runs/$SCHEDULE_RUN_ID" 200
-assert_run_binding "$SCHEDULE_RUN_ID" '' 'Schedule'
+SCHEDULE_ISSUE_ID="$(data '.issue_id')"
+SCHEDULE_INSTANCE_ID="$(data '.issue_agent_instance_id')"
+[[ -n "$SCHEDULE_ISSUE_ID" && -n "$SCHEDULE_INSTANCE_ID" ]] || \
+  fail 'Schedule Run did not create its Issue scope'
+assert_run_binding "$SCHEDULE_RUN_ID" "$SCHEDULE_ISSUE_ID" 'Schedule' "$SCHEDULE_INSTANCE_ID"
 status="$(data '.status')"
 for ((attempt = 0; attempt < 600; attempt++)); do
-  assert_no_pending_approvals "$SCHEDULE_RUN_ID" '' 'Schedule Run'
+  assert_no_pending_approvals "$SCHEDULE_RUN_ID" "$SCHEDULE_ISSUE_ID" 'Schedule Run'
   case "$status" in
     succeeded) break ;;
     failed|cancelled|lost) fail "Schedule Run ended as $status" ;;
   esac
   sleep 0.5
   api GET "/v1/runs/$SCHEDULE_RUN_ID" 200 >/dev/null
-  assert_run_binding "$SCHEDULE_RUN_ID" '' 'Schedule'
+  assert_run_binding "$SCHEDULE_RUN_ID" "$SCHEDULE_ISSUE_ID" 'Schedule' "$SCHEDULE_INSTANCE_ID"
   status="$(data '.status')"
 done
 [[ "$status" == succeeded ]] || fail 'Schedule Run did not succeed'
 assert_schedule_workspace_writes
 assert_project_workspace_manifest
 api GET "/v1/scheduled-tasks/$TASK_ID/runs" 200
-jq -e --arg run "$SCHEDULE_RUN_ID" --arg task "$TASK_ID" \
+jq -e --arg run "$SCHEDULE_RUN_ID" --arg task "$TASK_ID" --arg issue "$SCHEDULE_ISSUE_ID" \
   --arg trigger "manual:schedule-$TASK_ID" '
   ([.data.items[] | select(
     .scheduled_task_id == $task and .trigger_key == $trigger and
-    .run_id == $run and .status == "succeeded")] | length) == 1
+    .run_id == $run and .issue_id == $issue and .status == "succeeded")] | length) == 1
 ' <<<"$RESPONSE" >/dev/null || fail 'scheduled task occurrence did not advance for the exact Run'
 wait_for_git_snapshots "$SCHEDULE_RUN_ID" 'Schedule Run' written
 

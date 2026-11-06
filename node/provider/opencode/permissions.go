@@ -91,6 +91,11 @@ func (c *Client) permissionRules(request provider.RunRequest) []map[string]strin
 		for _, action := range []string{"read", "glob", "grep", "skill", "execute"} {
 			rules = append(rules, rule(action, "*", "allow"))
 		}
+		// The assistant's only MCP server is the run-scoped work tool host,
+		// which exposes read-only tools only. Native Code Mode filters the
+		// namespace by a server-level action, so allow the teamva-issue prefix;
+		// the blanket deny above would otherwise remove it from the catalog.
+		rules = append(rules, rule("teamva-issue_*", "*", "allow"))
 		// A read-only assistant still needs a real shell for FileBridge heredocs.
 		// Only a running OS sandbox with the exact host IPC may enable it: the
 		// profile grants IPC/native data, NEVER the assistant's business/CWD roots.

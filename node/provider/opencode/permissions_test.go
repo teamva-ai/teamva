@@ -56,6 +56,19 @@ func permissionEffect(rules []map[string]string, action, resource string) string
 	return effect
 }
 
+func TestReadOnlyAssistantAllowsOnlyTheWorkMCPNamespace(t *testing.T) {
+	client := testClient(t)
+	rules := client.permissionRules(provider.RunRequest{CWD: t.TempDir(), ReadOnly: true})
+	for _, action := range []string{"teamva-issue_work_records_query", "teamva-issue_execute"} {
+		if effect := permissionEffect(rules, action, "*"); effect != "allow" {
+			t.Fatalf("%s effect = %q, want allow", action, effect)
+		}
+	}
+	if effect := permissionEffect(rules, "other-server_write", "*"); effect != "deny" {
+		t.Fatalf("read-only foreign MCP tool effect = %q, want deny", effect)
+	}
+}
+
 func permissionFixtureDirectory(t *testing.T, root string, parts ...string) string {
 	t.Helper()
 	value := filepath.Join(append([]string{root}, parts...)...)
