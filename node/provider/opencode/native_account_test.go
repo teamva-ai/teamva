@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -86,7 +87,7 @@ func TestNativeAccountImportsSelectedKeysAndOnlyPublicCatalogReadOnly(t *testing
 	for _, name := range []string{"opencode.json", nativeCatalogFilename} {
 		file := filepath.Join(dir, "opencode", name)
 		info, err := os.Stat(file)
-		if err != nil || info.Mode().Perm() != 0o600 {
+		if err != nil || (runtime.GOOS != "windows" && info.Mode().Perm() != 0o600) {
 			t.Fatal("native account projection is not private 0600")
 		}
 		raw, _ := os.ReadFile(file)
@@ -159,5 +160,16 @@ func TestNativeAccountMissingDoesNotCreateOrUpgradeDatabase(t *testing.T) {
 	after, _ := os.ReadFile(path)
 	if !bytes.Equal(before, after) {
 		t.Fatal("unsupported native account was modified/recreated")
+	}
+}
+
+func TestNativeAccountFileURLKeepsWindowsDriveInThePath(t *testing.T) {
+	for _, test := range []struct{ input, want string }{
+		{"/Users/me/.local/share/opencode/opencode.db", "file:///Users/me/.local/share/opencode/opencode.db"},
+		{"C:/Users/me/.local/share/opencode/opencode.db", "file:///C:/Users/me/.local/share/opencode/opencode.db"},
+	} {
+		if got := nativeAccountFileURL(test.input).String(); got != test.want {
+			t.Fatalf("nativeAccountFileURL(%q) = %q, want %q", test.input, got, test.want)
+		}
 	}
 }

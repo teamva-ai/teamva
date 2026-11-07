@@ -34,6 +34,26 @@ func TestProductionBundleAllowsLoopbackHTTP(t *testing.T) {
 	}
 }
 
+func TestWindowsInstallerPreservesUserData(t *testing.T) {
+	contents, err := os.ReadFile("build/windows/installer/project.nsi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(contents)
+	for _, required := range []string{
+		`InstallDir "$LOCALAPPDATA\Programs\${INFO_PRODUCTNAME}"`,
+		`Resources\opencode\windows-x64`,
+		`!insertmacro wails.writeUninstaller`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("installer missing %q", required)
+		}
+	}
+	if strings.Contains(strings.ToLower(script), "rmdir /r") {
+		t.Fatal("installer must not recursively remove user files")
+	}
+}
+
 func TestApplicationMenuIncludesNativeAndDesktopActions(t *testing.T) {
 	applicationMenu := newApplicationMenu(newDesktopApp(nil, "1.2.3"))
 	if len(applicationMenu.Items) != 6 {

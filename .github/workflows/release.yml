@@ -102,7 +102,8 @@ jobs:
 
           - macOS Apple Silicon: `teamva-desktop-darwin-arm64.dmg`
           - macOS Intel: `teamva-desktop-darwin-x64.dmg`
-          - Windows x64: `Teamva-<VERSION>-windows-x64.zip`
+          - Windows x64 安装包: `Teamva-<VERSION>-windows-x64-setup.exe`
+          - Windows x64 便携版: `Teamva-<VERSION>-windows-x64.zip`
           - Linux x86_64: `Teamva-<VERSION>-linux-x86_64.AppImage`
           - Linux arm64: `Teamva-<VERSION>-linux-arm64.AppImage`
           - 校验和 / Checksums: `sha256.txt`
@@ -120,7 +121,8 @@ jobs:
 
           ### Windows
 
-          解压后运行 `Teamva.exe`。程序未签名，SmartScreen 会提示“Windows 已保护你的电脑”：
+          运行 `Teamva-<VERSION>-windows-x64-setup.exe` 安装（按用户安装，不需要管理员权限），
+          或解压便携版后运行 `Teamva.exe`。程序未签名，SmartScreen 会提示“Windows 已保护你的电脑”：
           点击“更多信息”→“仍要运行”。当前 Windows 版暂不提供 Git 变更面板。
 
           ### Linux
@@ -193,6 +195,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
 
+      - name: Install NSIS
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            choco install nsis -y --no-progress
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $nsisDir = Join-Path ${env:ProgramFiles(x86)} 'NSIS'
+          if (Test-Path (Join-Path $nsisDir 'makensis.exe')) { $nsisDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append }
+
+      - name: Test Windows native account projection
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          cd node
+          go test ./provider/opencode -run '^TestNativeAccount' -count=1
+
       - name: Build macOS app and DMG
         if: matrix.platform == 'mac'
         env:
@@ -225,7 +245,7 @@ jobs:
           if [ "$PLATFORM" = "mac" ]; then
             files=(dist/release/*.dmg dist/release/*.zip)
           elif [ "$PLATFORM" = "windows" ]; then
-            files=(dist/release/*windows-x64.zip)
+            files=(dist/release/*windows-x64.zip dist/release/*windows-x64-setup.exe)
           else
             files=(dist/release/*.AppImage)
           fi
@@ -303,6 +323,7 @@ jobs:
             '^[0-9a-f]{64}  teamva-desktop-darwin-x64\.dmg$' \
             '^[0-9a-f]{64}  teamva-desktop-darwin-x64\.zip$' \
             '^[0-9a-f]{64}  Teamva-[^ ]+-windows-x64\.zip$' \
+            '^[0-9a-f]{64}  Teamva-[^ ]+-windows-x64-setup\.exe$' \
             '^[0-9a-f]{64}  Teamva-[^ ]+-linux-x86_64\.AppImage$' \
             '^[0-9a-f]{64}  Teamva-[^ ]+-linux-arm64\.AppImage$'; do
             if ! grep -Eq "$pattern" sha256.txt; then

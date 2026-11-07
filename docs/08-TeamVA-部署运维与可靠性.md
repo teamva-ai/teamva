@@ -2,7 +2,7 @@
 
 ## 1. 当前发布目标
 
-当前发布 macOS arm64/x64 桌面 ZIP/DMG、Windows x64 便携包与 Linux x86_64/arm64 AppImage。制品由
+当前发布 macOS arm64/x64 桌面 ZIP/DMG、Windows x64 安装包与便携 ZIP、Linux x86_64/arm64 AppImage。制品由
 GitHub Actions 在对应平台原生构建，不依赖 Cloudflare、Docker、Pages 或单独安装的 CLI。
 
 ## 2. 构建

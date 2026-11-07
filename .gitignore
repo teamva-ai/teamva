@@ -84,3 +84,6 @@ desktop/desktop.exe
 
 # 拉取的 Provider 运行时（scripts/vendor/opencode.sh）
 vendor/opencode/
+# Wails writes these next to the checked-in NSIS project during a Windows build.
+desktop/build/windows/installer/wails_tools.nsh
+desktop/build/windows/installer/tmp/

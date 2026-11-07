@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -30,6 +31,15 @@ func nativeAccountPath() (string, error) {
 	return filepath.Join(home, "opencode", "opencode.db"), nil
 }
 
+// Keep Windows drive letters in the URI path, not the authority.
+func nativeAccountFileURL(path string) *url.URL {
+	slashed := filepath.ToSlash(path)
+	if !strings.HasPrefix(slashed, "/") {
+		slashed = "/" + slashed
+	}
+	return &url.URL{Scheme: "file", Path: slashed}
+}
+
 // Read only the current V2 account selection and the public models.dev cache.
 // Never open the user's database through OpenCode (which may migrate it), copy
 // the database, or read OAuth token fields/whole credential values.
@@ -47,7 +57,7 @@ func readNativeAccount() (nativeAccount, error) {
 	if err != nil || !info.Mode().IsRegular() {
 		return result, invalid
 	}
-	uri := &url.URL{Scheme: "file", Path: path}
+	uri := nativeAccountFileURL(path)
 	query := url.Values{"mode": {"ro"}, "_pragma": {"query_only(1)", "busy_timeout(1000)"}}
 	uri.RawQuery = query.Encode()
 	db, err := sql.Open("sqlite", uri.String())
